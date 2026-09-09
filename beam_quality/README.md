@@ -133,6 +133,19 @@ ingratta@yorku.ca) with **Bruce Howard** (York U.). Extended
 documentation) by **J. L. Barrow** (UMN, jbarrow@umn.edu) with
 assistance from Anthropic's Claude (Fable 5).
 
+The goodbeam algorithms ported here stand on a decade-plus of NOvA
+`IFDBSpillInfo` development. In particular: **L. Goodenough** (ANL) and
+**S. Phan-Budd** (Winona State U.), the module's original authors;
+**Giulia Brunetti** (FNAL), who built the intensity-weighted
+extrapolated-to-target beam position machinery (`BpmProjection` /
+`BpmAtTarget`) this package ports; **Teresa Lackey** (FNAL), the
+module's long-term maintainer (period-dependent position/width cuts,
+robust handling of missing toroid devices, documentation);
+**Raphael Schroeter** (horn-off `is0HC` flag), **Alexander Radovic**
+(RHC-safe horn-current cuts), **Jonathan Paley** (RHC determination),
+**Evan Niner** (beam-width device maintenance), and **Jim Hylen**
+(FNAL AD), source of the horn stripline calibration constants.
+
 References: NuMI beam NIM paper
 [arXiv:1507.06690](https://arxiv.org/abs/1507.06690); NOvA
 `IFDBSpillInfo`; IFBeam `DataAccessSyntax` wiki (Fermilab SSO).

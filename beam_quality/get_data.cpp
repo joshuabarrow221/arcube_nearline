@@ -61,6 +61,15 @@
 //      (historical link: https://cdcvs.fnal.gov/redmine/projects/novaart/repository/entry/trunk/IFDBSpillInfo/IFDBSpillInfo_module.cc#L685
 //      — Fermilab's Redmine now requires SSO). The per-device notes and
 //      the horn-current calibration used below are taken from it.
+//      Credit where due: the module was originally authored by
+//      L. Goodenough (ANL) and S. Phan-Budd (Winona State U.); the
+//      intensity-weighted extrapolated-to-target position machinery
+//      (BpmProjection/BpmAtTarget) ported below is due to G. Brunetti
+//      (FNAL); T. Lackey (FNAL) is its long-term maintainer
+//      (period-dependent cuts, robust missing-toroid handling);
+//      R. Schroeter added the is0HC horn-off flag, A. Radovic the
+//      RHC-safe horn cuts, J. Paley the RunHistory RHC determination;
+//      the stripline calibration constants are from J. Hylen (FNAL AD).
 //  [3] IFBeam REST API syntax, "DataAccessSyntax" wiki of the
 //      "ifbeamdata" project,
 //      https://cdcvs.fnal.gov/redmine/projects/ifbeamdata/wiki/DataAccessSyntax
