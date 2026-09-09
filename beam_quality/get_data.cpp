@@ -139,9 +139,13 @@
 //      convention);
 //    - horizontal/vertical readings paired within +-0.5 s;
 //  and they DRAW the +-2 mm NOvA position box (cuts 3-4) on the
-//  figures for illustration only — it is not applied as a filter, and
-//  it is drawn against the raw TGT-station readback rather than
-//  NOvA's extrapolated-to-target position (see the NOTE under cut 4).
+//  figures for illustration only — it is not applied as a filter. The
+//  plotted per-batch positions are the 121- and TGT-station readings
+//  linearly extrapolated to the target z with the same geometry as
+//  computeBpmPosition() below (NOvA's BpmProjection), so the box and
+//  the points share the coordinate the cut is defined in; the plots
+//  differ from the cut quantity only in skipping the intensity
+//  weighting (they show individual batches, not the per-spill mean).
 // =====================================================================
 
 #include <curl/curl.h>
