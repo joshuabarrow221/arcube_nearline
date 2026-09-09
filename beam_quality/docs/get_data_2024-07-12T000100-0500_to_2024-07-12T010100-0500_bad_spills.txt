@@ -1,0 +1,42 @@
+Bad-spill report for get_data_2024-07-12T000100-0500_to_2024-07-12T010100-0500
+goodbeam = NOvA cuts 1-5 (POT, horn current, x/y position, x/y width);
+the trigger-timing cut 6 is not evaluable without a detector trigger stream.
+Cut values: POT > 2.00e12 protons; horn current in (-202, -196.4) kA; x position in (-2, +2) mm; y position in (-2, +2) mm; x width in (0.57, 1.58) mm; y width in (0.57, 1.58) mm
+
+7 of 2737 spills fail goodbeam. POT lost: 8.253e+10 of 1.395e+17 (0.0001%)
+
+spill @ 1720760951.654  (2024-07-12 00:09:11.654000 CDT)
+  POT 4.343e+10  hornI -200.6 kA  pos (MISSING, MISSING) mm  width (MISSING, MISSING) mm
+  fails: POT, x position, y position, x width, y width
+  reason: near-zero POT 'ghost' spill (<1e11 protons); BPM and multiwire report no usable data
+
+spill @ 1720760952.854  (2024-07-12 00:09:12.854000 CDT)
+  POT 3.909e+10  hornI -200.6 kA  pos (MISSING, MISSING) mm  width (MISSING, MISSING) mm
+  fails: POT, x position, y position, x width, y width
+  reason: near-zero POT 'ghost' spill (<1e11 protons); BPM and multiwire report no usable data
+
+spill @ 1720761467.733  (2024-07-12 00:17:47.733000 CDT)
+  POT MISSING  hornI -200.3 kA  pos (0.3175, -1.161) mm  width (1.444, 1.456) mm
+  fails: POT
+  reason: no toroid reading in IFBeam at this spill (E:TRTGTD and E:TR101D both absent) -> POT unknown, POT cut fails
+
+spill @ 1720761981.911  (2024-07-12 00:26:21.911000 CDT)
+  POT MISSING  hornI -200.4 kA  pos (0.2835, -0.9394) mm  width (1.446, 1.459) mm
+  fails: POT
+  reason: no toroid reading in IFBeam at this spill (E:TRTGTD and E:TR101D both absent) -> POT unknown, POT cut fails
+
+spill @ 1720762547.746  (2024-07-12 00:35:47.746000 CDT)
+  POT MISSING  hornI -200.3 kA  pos (0.3422, -0.8889) mm  width (1.449, 1.46) mm
+  fails: POT
+  reason: no toroid reading in IFBeam at this spill (E:TRTGTD and E:TR101D both absent) -> POT unknown, POT cut fails
+
+spill @ 1720763421.801  (2024-07-12 00:50:21.801000 CDT)
+  POT MISSING  hornI -200.3 kA  pos (0.2695, -1.091) mm  width (1.443, 1.456) mm
+  fails: POT
+  reason: no toroid reading in IFBeam at this spill (E:TRTGTD and E:TR101D both absent) -> POT unknown, POT cut fails
+
+spill @ 1720763627.653  (2024-07-12 00:53:47.653000 CDT)
+  POT MISSING  hornI -200.4 kA  pos (0.3314, -1.213) mm  width (1.429, 1.438) mm
+  fails: POT
+  reason: no toroid reading in IFBeam at this spill (E:TRTGTD and E:TR101D both absent) -> POT unknown, POT cut fails
+
