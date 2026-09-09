@@ -3,10 +3,13 @@
 //
 //  Reads the "beam" TTree written by get_data.cpp and renders an
 //  animated GIF: each frame is a TH2D filled with the individual
-//  batch-by-batch target-BPM readings (E:HPTGT/E:VPTGT array elements
-//  1-6; element 0 is the auto-tune average and zeros are bad readings,
-//  both excluded) of 10 consecutive spills, drawn with COLZ. The blob's
-//  frame-to-frame motion shows the beam position "sloshing".
+//  batch-by-batch beam positions (BPM array elements 1-6; element 0 is
+//  the auto-tune average and zeros are bad readings, both excluded) of
+//  10 consecutive spills, drawn with COLZ. Each batch's 121- and
+//  TGT-station readings are linearly extrapolated to the target z
+//  (NOvA BpmProjection geometry), so the plotted coordinate is the one
+//  the goodbeam position cut is defined in. The blob's frame-to-frame
+//  motion shows the beam position "sloshing".
 //
 //  The full catalogue of NOvA's goodbeam criteria, and exactly which
 //  of them this pipeline applies, illustrates, or omits, is documented
@@ -45,15 +48,30 @@ void beam_slosh(const std::string& inFile =
     TTreeReaderValue<double> time(reader, "time");
     TTreeReaderValue<std::vector<double>> hp(reader, "HPTGT");
     TTreeReaderValue<std::vector<double>> vp(reader, "VPTGT");
+    TTreeReaderValue<std::vector<double>> hu(reader, "HP121");
+    TTreeReaderValue<std::vector<double>> vu(reader, "VP121");
+
+    // Surveyed BPM station z-positions [feet] and the NOvA linear
+    // extrapolation of each batch to the target (z = 0): the same
+    // constants and formula as computeBpmPosition() in get_data.cpp
+    // (ported from NOvA's IFDBSpillInfo extrapolate_position /
+    // BpmProjection), so the plotted coordinate matches the one the
+    // goodbeam position cut acts on.
+    constexpr double zHp121 = -68.04458, zVp121 = -66.99283,
+                     zHptgt = -31.25508, zVptgt = -30.16533;
+    constexpr double fx = (0.0 - zHp121) / (zHptgt - zHp121);
+    constexpr double fy = (0.0 - zVp121) / (zVptgt - zVp121);
 
     struct Spill { double t; std::vector<std::pair<double,double>> pts; };
     std::vector<Spill> spills;
     while (reader.Next()) {
-        size_t n = std::min(hp->size(), vp->size());
+        size_t n = std::min({hp->size(), vp->size(), hu->size(), vu->size()});
         Spill s{*time, {}};
         for (size_t j = 1; j < n; ++j)              // skip auto-tune element 0
-            if ((*hp)[j] != 0.0 && (*vp)[j] != 0.0) // zeros = bad batch readings
-                s.pts.emplace_back((*hp)[j], (*vp)[j]);
+            if ((*hp)[j] != 0.0 && (*vp)[j] != 0.0 &&   // zeros = bad readings
+                (*hu)[j] != 0.0 && (*vu)[j] != 0.0)
+                s.pts.emplace_back((*hu)[j] + ((*hp)[j] - (*hu)[j]) * fx,
+                                   (*vu)[j] + ((*vp)[j] - (*vu)[j]) * fy);
         if (!s.pts.empty()) spills.push_back(std::move(s));
     }
     int nFrames = static_cast<int>(spills.size()) / spillsPerFrame;
@@ -137,7 +155,7 @@ void beam_slosh(const std::string& inFile =
 
         title.SetTextSize(0.033);
         title.DrawLatex(0.09, 0.955,
-            "NuMI beam position at target  (E:HPTGT / E:VPTGT, batch-by-batch, 10 spills per frame)");
+            "NuMI beam position at target  (per-batch, extrapolated to target z, 10 spills/frame)");
         // spill epoch (UTC) -> CDT = UTC-5
         std::time_t tt = static_cast<std::time_t>(t0) - 5 * 3600;
         char buf[64]; std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S CDT", std::gmtime(&tt));

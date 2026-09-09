@@ -20,7 +20,11 @@ as missed spills), and a third right-hand panel tracks the POT-weighted
 beam-delivery efficiency: one dot per 10-spill group plus the
 cumulative running efficiency. Axes are never clipped: they span the
 union of the data and the NOvA goodbeam position box (|x|,|y| < 2 mm),
-drawn in red. Rendered at 3000x2000.
+drawn in red. All plotted positions are the per-batch 121- and
+TGT-station BPM readings linearly extrapolated to the target z (NOvA's
+BpmProjection geometry) — the same coordinate the goodbeam position cut
+is defined in, so the box and the points are directly comparable.
+Rendered at 3000x2000.
 
 The full catalogue of NOvA's goodbeam criteria, and exactly which of
 them this pipeline applies, illustrates, or omits, is documented in the
@@ -71,13 +75,27 @@ def batches(device, col):
     d = df[(df.device == device) & (df["index"] >= 1) & (df.value != 0.0)]
     return d.rename(columns={"time_s": "t", "value": col, "index": "idx"})[["t", "idx", col]]
 
-H = batches("E:HPTGT[]", "x")
-V = batches("E:VPTGT[]", "y")
+# Surveyed BPM station z-positions [feet] and the NOvA linear
+# extrapolation of each batch to the target (z = 0): the same constants
+# and formula as computeBpmPosition() in get_data.cpp (ported from
+# NOvA's IFDBSpillInfo extrapolate_position/BpmProjection), so the
+# plotted coordinates match the ones the goodbeam position cut acts on.
+Z_HP121, Z_VP121 = -68.04458, -66.99283
+Z_HPTGT, Z_VPTGT = -31.25508, -30.16533
+FX = (0.0 - Z_HP121) / (Z_HPTGT - Z_HP121)
+FY = (0.0 - Z_VP121) / (Z_VPTGT - Z_VP121)
+
+HT = batches("E:HPTGT[]", "xt"); HU = batches("E:HP121[]", "xu")
+VT = batches("E:VPTGT[]", "yt"); VU = batches("E:VP121[]", "yu")
 pieces = []
 for i in range(1, 7):
-    h = H[H.idx == i][["t", "x"]].sort_values("t")
-    v = V[V.idx == i][["t", "y"]].sort_values("t")
-    p = pd.merge_asof(h, v, on="t", tolerance=0.5, direction="nearest").dropna()
+    p = HT[HT.idx == i][["t", "xt"]].sort_values("t")
+    for d, col in ((HU, "xu"), (VT, "yt"), (VU, "yu")):
+        p = pd.merge_asof(p, d[d.idx == i][["t", col]].sort_values("t"),
+                          on="t", tolerance=0.5, direction="nearest")
+    p = p.dropna()
+    p["x"] = p.xu + (p.xt - p.xu) * FX   # extrapolated to target z
+    p["y"] = p.yu + (p.yt - p.yu) * FY
     p["idx"] = i
     pieces.append(p)
 P = pd.concat(pieces).sort_values("t", kind="stable").reset_index(drop=True)
@@ -152,7 +170,7 @@ fig.suptitle("NuMI spill-train arrival order and goodbeam quality at the target 
              fontsize=19, color=INK, x=0.06, ha="left", y=0.965)
 fig.text(0.06, 0.915,
          f"{win0:%Y-%m-%d  %H:%M} → {win1:%H:%M} CDT  ·  batch 1 arrives first, batches 2-6 follow  ·  "
-         "pale points fail NOvA goodbeam cuts 1-5  ·  shown points accumulate in gray",
+         "positions extrapolated to target z  ·  pale points fail goodbeam cuts 1-5",
          fontsize=12, color=INK2)
 
 # --- main panel ---

@@ -1,13 +1,15 @@
 """Animated GIF of NuMI beam position at the target vs time.
 
 Reads the tidy CSV written by get_data.cpp and plots the INDIVIDUAL
-batch-by-batch target-BPM readings (E:HPTGT[], E:VPTGT[]; array indices
-1-6, zeros = bad readings excluded) — no averaging at all, so the
-per-batch "lobe" structure is visible. Each frame shows the 60 batch
-points of 10 consecutive spills. Axes are never clipped: they span the
-union of the data and the NOvA "goodbeam" position box cut
-(IFDBSpillInfo.fcl: posx and posy within +-2 mm at target), which is
-drawn on the plot. Rendered at 3000x2000.
+batch-by-batch BPM readings (array indices 1-6, zeros = bad readings
+excluded) — no averaging at all, so the per-batch "lobe" structure is
+visible. Each batch's 121- and TGT-station readings are linearly
+extrapolated to the target z (NOvA's BpmProjection geometry), so the
+plotted coordinate is the one the goodbeam position cut is defined in.
+Each frame shows the 60 batch points of 10 consecutive spills. Axes are
+never clipped: they span the union of the data and the NOvA "goodbeam"
+position box cut (IFDBSpillInfo.fcl: posx and posy within +-2 mm at
+target), which is drawn on the plot. Rendered at 3000x2000.
 
 The full catalogue of NOvA's goodbeam criteria, and exactly which of
 them this pipeline applies, illustrates, or omits, is documented in the
@@ -51,14 +53,28 @@ def batches(device, col):
     d = df[(df.device == device) & (df["index"] >= 1) & (df.value != 0.0)]
     return d.rename(columns={"time_s": "t", "value": col, "index": "idx"})[["t", "idx", col]]
 
-H = batches("E:HPTGT[]", "x")
-V = batches("E:VPTGT[]", "y")
-# pair H and V per batch index; same-spill rows can differ by a few ms
+# Surveyed BPM station z-positions [feet] and the NOvA linear
+# extrapolation of each batch to the target (z = 0): the same constants
+# and formula as computeBpmPosition() in get_data.cpp (ported from
+# NOvA's IFDBSpillInfo extrapolate_position/BpmProjection), so the
+# plotted coordinates match the ones the goodbeam position cut acts on.
+Z_HP121, Z_VP121 = -68.04458, -66.99283
+Z_HPTGT, Z_VPTGT = -31.25508, -30.16533
+FX = (0.0 - Z_HP121) / (Z_HPTGT - Z_HP121)
+FY = (0.0 - Z_VP121) / (Z_VPTGT - Z_VP121)
+
+HT = batches("E:HPTGT[]", "xt"); HU = batches("E:HP121[]", "xu")
+VT = batches("E:VPTGT[]", "yt"); VU = batches("E:VP121[]", "yu")
+# pair the four devices per batch index; same-spill rows differ by ~ms
 pieces = []
 for i in range(1, 7):
-    h = H[H.idx == i][["t", "x"]].sort_values("t")
-    v = V[V.idx == i][["t", "y"]].sort_values("t")
-    p = pd.merge_asof(h, v, on="t", tolerance=0.5, direction="nearest").dropna()
+    p = HT[HT.idx == i][["t", "xt"]].sort_values("t")
+    for d, col in ((HU, "xu"), (VT, "yt"), (VU, "yu")):
+        p = pd.merge_asof(p, d[d.idx == i][["t", col]].sort_values("t"),
+                          on="t", tolerance=0.5, direction="nearest")
+    p = p.dropna()
+    p["x"] = p.xu + (p.xt - p.xu) * FX   # extrapolated to target z
+    p["y"] = p.yu + (p.yt - p.yu) * FY
     pieces.append(p)
 P = pd.concat(pieces).sort_values("t", kind="stable").reset_index(drop=True)
 spill_times = np.sort(P["t"].unique())
@@ -95,11 +111,13 @@ for ax in (axM, axX, axY):
     for sp in ax.spines.values():
         sp.set_color(GRID)
 
+win0 = datetime.fromtimestamp(spill_times[0], CDT)
+win1 = datetime.fromtimestamp(spill_times[-1], CDT)
 fig.suptitle("NuMI beam position at target  (E:HPTGT / E:VPTGT, IFBeam $A9 spills)",
              fontsize=19, color=INK, x=0.06, ha="left", y=0.965)
 fig.text(0.06, 0.915,
-         "2024-07-12  00:01 → 01:01 CDT  ·  batch-by-batch readings, 10 spills (60 points) per frame  "
-         "·  red box: NOvA goodbeam position cut (|x|,|y| < 2 mm)",
+         f"{win0:%Y-%m-%d  %H:%M} → {win1:%H:%M} CDT  ·  batch positions extrapolated to target z, "
+         "10 spills per frame  ·  red box: NOvA goodbeam cut (|x|,|y| < 2 mm)",
          fontsize=12, color=INK2)
 
 # --- main panel: beam spot ---
@@ -126,7 +144,7 @@ for ax, c, lab in ((axX, x, "Horizontal"), (axY, y, "Vertical")):
     ax.axhline(-CUT, color=RED, lw=1.4, linestyle=(0, (6, 3)))
     ax.set_title(f"{lab} position vs time (per batch)", fontsize=13, color=INK, loc="left")
     ax.set_ylabel("[mm]", fontsize=12, color=INK)
-axY.set_xlabel("Minutes after 00:01 CDT", fontsize=12, color=INK)
+axY.set_xlabel(f"Minutes after {win0:%H:%M} CDT", fontsize=12, color=INK)
 progX = axX.scatter([], [], s=1.5, color=BLUE, linewidths=0)
 progY = axY.scatter([], [], s=1.5, color=BLUE, linewidths=0)
 curX = axX.axvline(0, color=INK2, lw=1.2, alpha=0.7)

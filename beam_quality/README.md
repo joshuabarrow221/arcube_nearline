@@ -19,6 +19,14 @@ public — no Kerberos, VPN, or Fermilab credentials needed.
 | `beam_gif.py` | Animated GIF: individual batch positions, 10 spills/frame, with the NOvA position box cut drawn |
 | `beam_batches_gif.py` | Animated GIF: batch-1 vs batches-2-6 arrival order ("sloshing"), goodbeam pass/fail coloring, POT passed/missed counters, per-10-spill and cumulative delivery efficiency |
 | `beam_slosh.C` | ROOT macro: animated COLZ heatmap of the batch-by-batch beam position |
+
+All three visualizations plot each batch's 121- and TGT-station BPM
+readings **linearly extrapolated to the target z** using the same
+surveyed geometry and formula as the quality evaluation (NOvA's
+`BpmProjection`/`extrapolate_position`), so the plotted points and the
+drawn ±2 mm goodbeam box share the coordinate the cut is defined in.
+The plots differ from the cut quantity only in skipping the intensity
+weighting: they show individual batches, not the per-spill weighted mean.
 | `bad_spills_report.py` | Human-readable report of every spill failing goodbeam, with derived reasons |
 | `docs/` | Example bad-spill reports and a preview frame |
 
