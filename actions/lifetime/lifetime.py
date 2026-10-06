@@ -89,28 +89,42 @@ def fit_samples(input_file, output_file_plot, requested_samples=None, timestamp=
     results = []
 
     print(f'Opening file: {input_file}')
-    with h5py.File(input_file, 'r') as h5_file:
+    from flow_input import open_flow
+    import hashlib
+    with open_flow(input_file) as (h5_file, provenance):
         samples = find_samples(h5_file, requested_samples)
         multiple_samples = len(samples) > 1
 
         for sample, dset_path in samples:
             paths = dset_path if isinstance(dset_path, list) else [dset_path]
-            segments = valid_segments(np.concatenate([h5_file[path][:] for path in paths]))
+            raw_segments = [h5_file[path][:] for path in paths]
+            dataset_provenance = [dict(path=path, shape=list(array.shape), dtype=str(array.dtype),
+                                       sha256=hashlib.sha256(array.tobytes()).hexdigest())
+                                  for path, array in zip(paths, raw_segments)]
+            segments = valid_segments(np.concatenate(raw_segments))
             print(f'Extracting {sample} lifetime using {len(segments)} segments')
 
             result = {
                 'timestamp': timestamp.isoformat(),
                 'sample': sample,
                 'method': 'track',
+                'calculation_source': 'flow_segments',
                 'uncertainty': 'DeMario fit covariance; excludes selection/calibration systematics',
-                'input_file': os.path.abspath(input_file),
+                'input_file': h5_file.attrs.get('source_flow_url', provenance['input_file']),
                 'segments_dset': dset_path,
                 'n_segments': len(segments),
+                'flow_provenance': provenance,
+                'flow_datasets': dataset_provenance,
                 'fit_status': 'failed',
                 'lifetime_us': None,
                 'error_us': None,
             }
 
+            if 'source_flow_url' in h5_file.attrs:
+                result['flow_segment_cache'] = os.path.abspath(input_file)
+                result['flow_source_etag'] = h5_file.attrs['source_etag']
+                result['flow_source_size_bytes'] = int(h5_file.attrs['source_size_bytes'])
+                result['flow_datasets'] = json.loads(h5_file.attrs['source_datasets'])
             try:
                 if not len(segments):
                     raise ValueError('no valid segments')
@@ -196,6 +210,43 @@ def valid_lifetime(entry):
             and (error is None or (np.isfinite(error) and error >= 0)))
 
 
+def is_flow_track(entry):
+    """Only direct FLOW fits (including documented pre-schema-4 fits) qualify."""
+    return (entry.get('method', 'track') == 'track'
+            and bool(entry.get('input_file'))
+            and (entry.get('calculation_source') == 'flow_segments'
+                 or (bool(entry.get('segments_dset')) and 'n_segments' in entry)))
+
+
+def compare_reference_lifetimes(derived, references):
+    """Exact-timestamp corroboration only: references never supply plot values."""
+    from purity_sources import aware_time
+    comparisons = []
+    for reference in references:
+        sample = reference.get('sample', 'all_mip')
+        if sample == 'mixed':
+            sample = 'all_mip'
+        candidates = [r for r in derived if is_flow_track(r)
+                      and r.get('sample') == sample
+                      and aware_time(r['timestamp']) == aware_time(reference['timestamp'])]
+        basename = reference.get('published_input_basename')
+        if basename:
+            candidates = [r for r in candidates if Path(r['input_file']).name == basename]
+        comparison = dict(timestamp=reference['timestamp'], sample=sample,
+            reference_lifetime_us=reference.get('lifetime_us'), reference_error_us=reference.get('error_us'),
+            reference_file=reference.get('reference_history'),
+            match_status='unmatched' if not candidates else 'ambiguous' if len(candidates)>1 else 'matched')
+        if len(candidates) == 1:
+            row = candidates[0]
+            comparison.update(input_file=row['input_file'], derived_fit_status=row.get('fit_status'),
+                derived_lifetime_us=row.get('lifetime_us'), derived_error_us=row.get('error_us'))
+            if valid_lifetime(row) and valid_lifetime(reference):
+                delta = row['lifetime_us']-reference['lifetime_us']
+                comparison.update(difference_us=delta, relative_difference_percent=100*delta/reference['lifetime_us'])
+        comparisons.append(comparison)
+    return comparisons
+
+
 def aggregate_track_lifetimes(entries, timezone_name='America/Chicago'):
     """Equal-weight means of per-file track fits in local six-hour windows.
 
@@ -210,6 +261,8 @@ def aggregate_track_lifetimes(entries, timezone_name='America/Chicago'):
     for row in unique.values():
         if row.get('method', 'track') != 'track':
             output.append(row)
+            continue
+        if not is_flow_track(row):
             continue
         stamp = aware_time(row['timestamp']).tz_convert(timezone_name)
         start = (stamp.tz_localize(None).normalize() + pd.Timedelta(hours=6*(stamp.hour//6))).tz_localize(timezone_name)
@@ -242,25 +295,16 @@ def aggregate_track_lifetimes(entries, timezone_name='America/Chicago'):
 
 
 def connected_values(rows):
-    """Break lines at rejected estimates and missing slow-controls windows."""
+    """Connect successive valid observations, including across missing windows.
+
+    Lines are visual guides only; rejected observations remain absent.
+    """
     from purity_sources import aware_time
-    times, values = [], []
-    previous = None
-    for row in sorted(rows, key=lambda r: aware_time(r['timestamp'])):
-        if not valid_lifetime(row):
-            times.append(row['timestamp']); values.append(None)
-            previous = None
-            continue
-        if (previous and row.get('method') in ('gas', 'gas_o2', 'prm')
-                and previous.get('period_end') and row.get('period_start')
-                and aware_time(previous['period_end']) != aware_time(row['period_start'])):
-            times.append(row['timestamp']); values.append(None)
-        times.append(row['timestamp']); values.append(row['lifetime_us'])
-        previous = row
-    return times, values
+    valid = sorted((r for r in rows if valid_lifetime(r)), key=lambda r: aware_time(r['timestamp']))
+    return [r['timestamp'] for r in valid], [r['lifetime_us'] for r in valid]
 
 
-def update_json(output_file_json, results, output_timeseries=None, timezone_name='America/Chicago', annotations=None):
+def update_json(output_file_json, results, output_timeseries=None, timezone_name='America/Chicago', annotations=None, reference_histories=None):
     """Serialize read/update/render so concurrent workers cannot publish stale history."""
     from datetime import timedelta
     from purity_sources import atomic_json
@@ -268,13 +312,33 @@ def update_json(output_file_json, results, output_timeseries=None, timezone_name
     path.parent.mkdir(parents=True, exist_ok=True)
     with Lock(str(path) + '.lock', default_timeout=timedelta(seconds=60), lifetime=timedelta(minutes=10)):
         data = json.loads(path.read_text()) if path.exists() else {'lifetimes': []}
-        indexed = {record_key(row): row for row in data['lifetimes']}
-        indexed.update({record_key(row): row for row in results})
-        data.update(schema_version=3, lifetimes=list(indexed.values()))
+        # Migrate unprovenanced/externally published track values out of the calculation history.
+        derived, references = [], list(data.get('reference_lifetimes', []))
+        for row in [*data['lifetimes'], *results]:
+            if row.get('method', 'track') == 'track' and not is_flow_track(row):
+                references.append(row)
+            else:
+                derived.append(row)
+        for reference_path in reference_histories or []:
+            payload = json.loads(Path(reference_path).read_text())
+            references.extend(dict(row, reference_history=str(Path(reference_path).resolve()))
+                              for row in payload['lifetimes'])
+        indexed = {record_key(row): row for row in derived}
+        reference_index = {}
+        for row in references:
+            key = (row['timestamp'], row.get('sample', 'all_mip'), row.get('published_input_basename'))
+            # Retain provenance when the plain published JSON is also supplied.
+            match = next((k for k in reference_index if k[:2] == key[:2]
+                          and (not k[2] or not key[2] or k[2] == key[2])), key)
+            reference_index[match] = dict(reference_index.get(match, {}), **row)
+        data.update(schema_version=4, lifetimes=list(indexed.values()), reference_lifetimes=list(reference_index.values()))
         data['plot_lifetimes'] = aggregate_track_lifetimes(data['lifetimes'], timezone_name)
+        data['reference_comparisons'] = compare_reference_lifetimes(data['lifetimes'], data['reference_lifetimes'])
+        if annotations is not None:
+            data['annotations'] = annotations if isinstance(annotations, list) else json.loads(Path(annotations).read_text())
         atomic_json(path, data)
         if output_timeseries:
-            draw_overlay(data['lifetimes'], output_timeseries, timezone_name, annotations)
+            draw_overlay(data['lifetimes'], output_timeseries, timezone_name, data.get('annotations'))
     return data
 
 
@@ -285,7 +349,7 @@ LABELS = {
     'beam': ('Externally triggered muon candidates · 6 h mean', '#CB7B21', '^'),
     'cosmic': ('Off-beam / cosmic-enriched candidates · 6 h mean', '#AA4D83', 'v'),
     'all_mip': ('All selected through-going MIP candidates · 6 h mean', '#444444', 'D'),
-    'mixed': ('Published mixed muon candidates · 6 h mean', '#777777', 'o'),
+    'mixed': ('FLOW track candidates · 6 h mean', '#777777', 'o'),
     'packet': ('Packets · whole detector (provisional)', '#28A1A1', 'P'),
 }
 
@@ -293,7 +357,7 @@ LABELS = {
 def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotations=None):
     """Publish exact 3000x2000 PNG and a self-contained interactive companion."""
     from collections import defaultdict
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
     from zoneinfo import ZoneInfo
     import tempfile
     import matplotlib.dates as mdates
@@ -333,9 +397,9 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
         linestyle = '--' if sample == 'gas_o2' else '-'
         ax.plot([aware_time(t).to_pydatetime().astimezone(tz) for t in line_times],
                 [np.nan if v is None else v for v in line_values],
-                linestyle=linestyle, color=color, linewidth=1, alpha=0.8)
+                linestyle=linestyle, color=color, linewidth=1.5, alpha=0.85)
         ax.plot(times, values, linestyle='none', marker=marker, color=color,
-                markersize=5, alpha=0.85, label=label,
+                markersize=6 if sample == 'prm' else 5, alpha=0.9, label=label,
                 markerfacecolor='none' if open_marker else color)
         indices = [i for i, error in enumerate(errors) if error is not None]
         if indices:
@@ -348,7 +412,7 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
                    f"n={row.get('n_measurements', row.get('n_segments', 'unknown'))}<br>"
                    f"{row.get('period_start', '')} — {row.get('period_end', '')}" for row in rows]
         interactive.add_trace(go.Scatter(x=[aware_time(t).isoformat() for t in line_times],
-            y=line_values, mode='lines', line=dict(color=color, width=1, dash='dash' if sample=='gas_o2' else 'solid'),
+            y=line_values, mode='lines', line=dict(color=color, width=1.5, dash='dash' if sample=='gas_o2' else 'solid'),
             legendgroup=label, showlegend=False, hoverinfo='skip', connectgaps=False))
         interactive.add_trace(go.Scatter(x=[aware_time(r['timestamp']).isoformat() for r in rows],
             y=values, mode='markers', name=label, legendgroup=label, marker=dict(color=color, symbol=symbol),
@@ -362,25 +426,49 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
     if groups:
         ax.legend(loc='lower center', bbox_to_anchor=(0.5, 1.015), fontsize=8,
                   framealpha=0.9, ncol=2 if len(groups)>3 else 1)
-        locator = mdates.AutoDateLocator(tz=tz, minticks=4, maxticks=8)
-        ax.xaxis.set_major_locator(locator)
-        ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator, tz=tz))
+        observed = [aware_time(r['timestamp']).to_pydatetime().astimezone(tz)
+                    for rows in groups.values() for r in rows]
+        first = min(observed).replace(hour=0, minute=0, second=0, microsecond=0)
+        last = max(observed).replace(hour=0, minute=0, second=0, microsecond=0)
+        days = (last.date()-first.date()).days
+        step = max(1, int(np.ceil(days/6)))
+        ticks = [first+timedelta(days=d) for d in range(0, days+1, step)]
+        if ticks[-1] != last:
+            if len(ticks)>1 and (last-ticks[-1]).total_seconds()/86400 < step/2:
+                ticks.pop()
+            ticks.append(last)
+        ax.set_xticks(ticks)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d', tz=tz))
     else:
         ax.text(0.5, 0.5, 'No valid lifetime measurements available', transform=ax.transAxes, ha='center')
     if annotations:
-        for event in json.loads(Path(annotations).read_text()):
+        events = annotations if isinstance(annotations, list) else json.loads(Path(annotations).read_text())
+        for event in events:
             stamp = aware_time(event['timestamp']).to_pydatetime()
             if 'end' in event:
-                ax.axvspan(stamp, aware_time(event['end']).to_pydatetime(), color='grey', alpha=0.15)
+                end = aware_time(event['end']).to_pydatetime()
+                ax.axvspan(stamp, end, color='grey', alpha=0.12)
+                center = stamp+(end-stamp)/2
+                ax.text(center, 0.96, event['label'], transform=ax.get_xaxis_transform(),
+                        ha='center', va='top', fontsize=9, color='#555555')
+                interactive.add_shape(type='rect', xref='x', yref='paper', x0=stamp.isoformat(),
+                    x1=end.isoformat(), y0=0, y1=1, fillcolor='grey', opacity=0.12, line_width=0)
+                interactive.add_annotation(x=center.isoformat(), y=0.96, xref='x', yref='paper',
+                    text=event['label'], showarrow=False, yanchor='top')
             else:
-                ax.axvline(stamp, color='grey', linestyle=':', alpha=0.7)
-            ax.text(stamp, 0.97, event['label'], transform=ax.get_xaxis_transform(), rotation=90, va='top', fontsize=8)
+                ax.axvline(stamp, color='#333333', linestyle='--', linewidth=1.2, alpha=0.8)
+                ax.text(stamp, 0.89, event['label'], transform=ax.get_xaxis_transform(), rotation=90,
+                        va='top', ha='right', fontsize=9, color='#333333')
+                interactive.add_shape(type='line', xref='x', yref='paper', x0=stamp.isoformat(),
+                    x1=stamp.isoformat(), y0=0, y1=1, line=dict(color='#333333', dash='dash'))
+                interactive.add_annotation(x=stamp.isoformat(), y=0.89, xref='x', yref='paper',
+                    text=event['label'], showarrow=False, textangle=-90, yanchor='top')
     latest = '; '.join(f"{LABELS.get(s, (s,))[0].split(' ·')[0]}: "
                        f"{max(aware_time(r.get('last_observed_at') or r['timestamp']) for r in rows).tz_convert(timezone_name):%m-%d %H:%M %Z}"
                        for (s, _), rows in sorted(groups.items()))
     note = ('PRM bars: daily SEM. Tracks: 6 h file means; bars = max(propagated fit error, between-file SEM), where available.\n'
-            'Gas conversion/packet selections provisional. Lines guide the eye; breaks mark rejected estimates or missing slow-controls windows.\n'
-            'External triggers do not establish beam origin.\n'
+            'Gas conversion/packet selections provisional. Lines connect valid points across gaps as visual guides, not interpolated measurements.\n'
+            'External triggers do not establish beam origin. PRM means use recorded positive lifetimes; waveform quality is not verified.\n'
             f'Failed/unavailable entries retained in JSON: {failed}. Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}.')
     import textwrap
     fig.text(0.08, 0.045, note + '\nLatest accepted data: ' + '\n'.join(textwrap.wrap(latest, 145)), fontsize=8, va='bottom')
@@ -472,6 +560,8 @@ def main():
     parser.add_argument('--output_file_json', '--output-file-json', help='Shared lifetime history JSON')
     parser.add_argument('--output-timeseries', help='3000x2000 overlay PNG (plus .html)')
     parser.add_argument('--sample', action='append', type=parse_sample_spec)
+    parser.add_argument('--flow-cache', help='Optional persistent segment cache for remote FLOW; default streams into memory')
+    parser.add_argument('--reference-history', action='append', default=[], help='Published JSON for corroboration only; never supplies plotted estimates')
     parser.add_argument('--select-muons', action='store_true', help='Run installed ndlar_flow selection into a sidecar when FLOW has no segments')
     parser.add_argument('--write-hdf5-metadata', action='store_true')
     parser.add_argument('--slow-controls', action='append', default=[], help='Raw snapshot JSON; repeat for multiple files')
@@ -502,22 +592,32 @@ def main():
         parser.error('FLOW fitting requires --output_file_plot')
     if args.packet_summary and not (args.timestamp or args.input_file):
         parser.error('--packet-summary without FLOW requires --timestamp')
+    from flow_input import is_remote
+    if args.input_file and is_remote(args.input_file) and (args.packet_file or args.write_hdf5_metadata):
+        parser.error('remote FLOW segment access supports track fits only; packet recovery/metadata writes need a local full FLOW')
     if args.packet_file and args.packet_summary:
         parser.error('choose --packet-file or --packet-summary')
     results = []
     if args.input_file:
         try:
             fit_input = args.input_file
+            if is_remote(args.input_file) and args.flow_cache:
+                from flow_input import cache_flow_segments
+                fit_input = cache_flow_segments(args.input_file, args.flow_cache or str(Path(args.output_file_json).parent/'flow_segments'),
+                                               [path for _, path in args.sample] if args.sample else None)
             if args.select_muons:
-                with h5py.File(args.input_file, 'r') as source:
+                from flow_input import open_flow
+                with open_flow(fit_input) as (source, _):
                     needs_selection = not any(path in source for _,path in (*SPLIT_SAMPLES, LEGACY_SAMPLE))
                 if needs_selection:
+                    if is_remote(fit_input):
+                        raise ValueError('remote FLOW has no segments; full event selection requires a local FLOW file')
                     from track_selection import select_muons
                     fit_input = str(Path(args.output_file_plot).with_suffix('.segments.h5'))
                     select_muons(args.input_file, fit_input)
             stamp = args.timestamp or date_from_filename(args.input_file).isoformat()
             fitted = fit_samples(fit_input, args.output_file_plot, args.sample, stamp)
-            if fit_input != args.input_file:
+            if fit_input != args.input_file and not is_remote(args.input_file):
                 for row in fitted:
                     row['selection_file'] = os.path.abspath(fit_input)
                     row['input_file'] = os.path.abspath(args.input_file)
@@ -525,7 +625,8 @@ def main():
         except Exception as exc:
             stamp = args.timestamp or date_from_filename(args.input_file).isoformat()
             results.append(dict(timestamp=aware_time(stamp).isoformat(), sample='all_mip', method='track',
-                input_file=os.path.abspath(args.input_file), fit_status='unavailable',
+                input_file=args.input_file if is_remote(args.input_file) else os.path.abspath(args.input_file),
+                calculation_source='flow_segments', fit_status='unavailable',
                 lifetime_us=None, error_us=None, fit_message=f'{type(exc).__name__}: {exc}'))
             print('Track sample unavailable:', exc)
         if args.write_hdf5_metadata:
@@ -534,7 +635,7 @@ def main():
         results.append(packet_result(args))
     if args.slow_controls:
         results.extend(aggregate_measurements(args.slow_controls, args.timezone, json.loads(Path(args.gas_quality_config).read_text()) if args.gas_quality_config else None))
-    update_json(args.output_file_json, results, args.output_timeseries, args.timezone, args.annotations)
+    update_json(args.output_file_json, results, args.output_timeseries, args.timezone, args.annotations, args.reference_history)
     if not results:
         print('Refreshed existing history; no new observations supplied.')
     elif not any(r.get('fit_status') == 'ok' for r in results):

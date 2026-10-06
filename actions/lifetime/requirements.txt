@@ -10,3 +10,8 @@ plotly>=5
 SQLAlchemy>=2.0
 psycopg2-binary>=2.9
 influxdb>=5.3
+
+# Remote FLOW segment reads (optional for local files):
+fsspec>=2024.6
+aiohttp>=3.9
+requests>=2.31

@@ -83,16 +83,19 @@ def test_local_day_and_six_hour_boundaries_across_dst(tmp_path, date, offset, ho
     assert pd.Timestamp(gas['period_end']).hour == 6
 
 
-def test_retry_replaces_results_and_legacy_history_survives(tmp_path):
+def test_retry_replaces_results_and_legacy_history_is_reference_only(tmp_path):
     path = tmp_path/'history.json'
     atomic_json(path, {'lifetimes':[dict(timestamp='2024-01-01T00:00:00Z', lifetime_us=900, error_us=20)]})
     entry = dict(timestamp='2026-09-29T00:00:00Z', input_file='x.h5', sample='beam',
-                 method='track', fit_status='ok', lifetime_us=1000, error_us=100)
+                 method='track', calculation_source='flow_segments', fit_status='ok', lifetime_us=1000, error_us=100)
     lifetime.update_json(path, [entry])
     entry['lifetime_us'] = 1100
     lifetime.update_json(path, [entry])
     records = json.loads(path.read_text())['lifetimes']
-    assert len(records) == 2 and records[-1]['lifetime_us'] == 1100
+    assert len(records) == 1 and records[0]['lifetime_us'] == 1100
+    data=json.loads(path.read_text())
+    assert len(data['reference_lifetimes']) == 1
+    assert all(r['lifetime_us'] != 900 for r in data['plot_lifetimes'])
 
 
 def test_pool_disjoint_track_samples(tmp_path):
@@ -256,7 +259,7 @@ def test_concurrent_history_writers_preserve_all_rows(tmp_path):
 sys.path.insert(0,sys.argv[1])
 from lifetime import update_json
 for i in range(4):
-    update_json(sys.argv[2],[dict(timestamp='2026-09-29T00:00:00Z',method='track',sample=sys.argv[3],input_file=str(i),lifetime_us=1000,error_us=1)])
+    update_json(sys.argv[2],[dict(timestamp='2026-09-29T00:00:00Z',method='track',calculation_source='flow_segments',sample=sys.argv[3],input_file=str(i),lifetime_us=1000,error_us=1)])
 '''
     children=[subprocess.Popen([sys.executable,'-c',code,str(SCRIPTS),str(path),str(i)]) for i in range(3)]
     assert all(child.wait(timeout=30)==0 for child in children)
@@ -272,7 +275,7 @@ def test_latest_observation_is_not_averaging_midpoint(tmp_path):
 def test_six_hour_track_means_preserve_samples_and_raw_history(tmp_path):
     def entry(file, value, error, sample='mixed', timestamp='2026-10-02T12:10:00-05:00'):
         return dict(input_file=file, timestamp=timestamp, lifetime_us=value,
-                    error_us=error, sample=sample, method='track', fit_status='ok')
+                    error_us=error, sample=sample, method='track', calculation_source='flow_segments', fit_status='ok')
     rows=[entry('a',1000,30),entry('b',1400,40),entry('beam',1700,60,'beam'),
           dict(entry('failed',None,None),fit_status='failed')]
     path=tmp_path/'history.json'
@@ -294,12 +297,12 @@ def test_six_hour_track_means_preserve_samples_and_raw_history(tmp_path):
 
 @pytest.mark.parametrize('date,offset,hours',[('2026-03-08','-06:00',5),('2026-11-01','-05:00',7)])
 def test_track_six_hour_windows_follow_local_dst(date,offset,hours):
-    rows=lifetime.aggregate_track_lifetimes([dict(timestamp=date+'T00:30:00'+offset,lifetime_us=1000,error_us=None)])
+    rows=lifetime.aggregate_track_lifetimes([dict(timestamp=date+'T00:30:00'+offset,lifetime_us=1000,error_us=None,input_file='flow.h5',calculation_source='flow_segments')])
     assert (aware_time(rows[0]['period_end'])-aware_time(rows[0]['period_start'])).total_seconds()==hours*3600
     assert rows[0]['error_us'] is None
 
 
-def test_lines_break_at_rejected_and_missing_gas_windows():
+def test_lines_connect_valid_points_across_rejected_and_missing_windows():
     def gas(hour,value):
         return dict(timestamp=f'2026-10-02T{hour+3:02d}:00:00Z',method='gas',
                     period_start=f'2026-10-02T{hour:02d}:00:00Z',
@@ -307,7 +310,91 @@ def test_lines_break_at_rejected_and_missing_gas_windows():
     valid=gas(0,100)
     rejected=dict(gas(6,None),fit_status='unavailable')
     last=gas(12,120)
-    assert lifetime.connected_values([valid,rejected,last])[1]==[100,None,120]
-    assert lifetime.connected_values([valid,last])[1]==[100,None,120]
+    assert lifetime.connected_values([valid,rejected,last])[1]==[100,120]
+    assert lifetime.connected_values([valid,last])[1]==[100,120]
     adjacent=gas(6,110)
     assert lifetime.connected_values([valid,adjacent])[1]==[100,110]
+
+
+
+def test_published_json_only_corroborates_and_cannot_seed_plot(tmp_path):
+    reference=tmp_path/'reference.json'
+    reference.write_text(json.dumps({'lifetimes':[dict(timestamp='2026-10-02T12:00:00Z',lifetime_us=1400,error_us=50)]}))
+    output=tmp_path/'history.json'
+    empty=lifetime.update_json(output,[],reference_histories=[reference])
+    assert empty['plot_lifetimes']==[] and empty['lifetimes']==[]
+    assert empty['reference_comparisons'][0]['match_status']=='unmatched'
+    derived=dict(timestamp='2026-10-02T07:00:00-05:00',lifetime_us=1200,error_us=40,
+        input_file='source.FLOW.hdf5',sample='all_mip',method='track',calculation_source='flow_segments',fit_status='ok')
+    data=lifetime.update_json(output,[derived],reference_histories=[reference])
+    assert len(data['reference_lifetimes'])==1
+    assert data['plot_lifetimes'][0]['lifetime_us']==1200
+    comparison=data['reference_comparisons'][0]
+    assert comparison['match_status']=='matched' and comparison['difference_us']==-200
+    assert data['lifetimes'][0]==derived
+
+
+def test_refit_reads_segment_values_not_hdf5_lifetime_metadata(tmp_path,monkeypatch):
+    import lifetime_funcs as funcs
+    import matplotlib.pyplot as plt
+    path=tmp_path/'source.FLOW.hdf5'
+    a=np.array([(2.,12.,100.,4.),(3.,30.,200.,9.)],dtype=[('dx','f8'),('dQ','f8'),('t','f8'),('nhits','f8')])
+    with h5py.File(path,'w') as f:
+        f.create_dataset(lifetime.LEGACY_SAMPLE[1],data=a)
+        f['analysis/rock_muon_segments'].attrs['electron_lifetime_us']=999999
+    def fit(**kwargs):
+        np.testing.assert_array_equal(kwargs['dqdx'],[6,10])
+        np.testing.assert_array_equal(kwargs['nhits'],[2,3])
+        return 1200,40,plt.figure()
+    monkeypatch.setattr(funcs,'langau_lifetime',fit)
+    result=lifetime.fit_samples(path,tmp_path/'fit.png',timestamp='2026-10-02T12:00:00Z')[0]
+    assert result['lifetime_us']==1200 and lifetime.is_flow_track(result)
+    assert result['flow_datasets'][0]['shape']==[2]
+
+
+def test_remote_flow_uses_conditional_ranges_without_full_download(tmp_path):
+    import hashlib
+    import threading
+    from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+    from flow_input import open_flow
+    path=tmp_path/'remote.h5'
+    data=np.arange(16,dtype='f8')
+    with h5py.File(path,'w') as f:
+        f.create_dataset('unrelated_bulk_payload',data=np.zeros(8*1024*1024,dtype='u1'))
+        f.create_dataset(lifetime.LEGACY_SAMPLE[1],data=data)
+    payload=path.read_bytes();etag='"fixture-etag"';transferred=[]
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self,*args): pass
+        def do_HEAD(self):
+            self.send_response(200);self.send_header('Content-Length',str(len(payload)))
+            self.send_header('ETag',etag);self.send_header('Accept-Ranges','bytes');self.end_headers()
+        def do_GET(self):
+            if self.headers.get('If-Match')!=etag or not self.headers.get('Range'):
+                self.send_error(412);return
+            start,end=map(int,self.headers['Range'].removeprefix('bytes=').split('-'))
+            end=min(end,len(payload)-1);content=payload[start:end+1]
+            self.send_response(206);self.send_header('Content-Length',str(len(content)))
+            self.send_header('Content-Range',f'bytes {start}-{end}/{len(payload)}')
+            self.end_headers();self.wfile.write(content);transferred.append(len(content))
+    server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    try:
+        with open_flow(f'http://127.0.0.1:{server.server_port}/remote.h5') as (source,provenance):
+            np.testing.assert_array_equal(source[lifetime.LEGACY_SAMPLE[1]][:],data)
+        assert 0 < sum(transferred) < len(payload)/2
+        assert provenance['source_etag']==etag
+        assert sum(transferred) <= provenance['requested_range_bytes'] < len(payload)/2
+    finally:
+        server.shutdown();server.server_close();thread.join()
+
+
+
+def test_annotations_survive_refresh_and_appear_in_interactive_plot(tmp_path):
+    path=tmp_path/'history.json';output=tmp_path/'overlay.png'
+    event=dict(timestamp='2026-09-17T10:32:00-05:00',label='DF-560 range: 0–10 to 0–1 ppm')
+    lifetime.update_json(path,[],annotations=[event])
+    lifetime.update_json(path,[],output)
+    assert json.loads(path.read_text())['annotations']==[event]
+    html=Path(str(output)+'.html').read_text()
+    assert 'DF-560 range' in html
+    assert Image.open(output).size==(3000,2000)

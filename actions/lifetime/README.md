@@ -43,8 +43,8 @@ nearline worker.
 snapshots, querying databases, updating history, and rendering the overlay.
 `lifetime_timeseries.py` remains a compatibility wrapper. The default PNG is
 exactly **3000 × 2000 pixels**; the companion is `<plot>.png.html`, retaining the
-existing shifter URL convention. Connecting lines guide the eye; rejected estimates and missing slow-controls
-windows break the lines. Each source's latest measurement date appears below the PNG.
+existing shifter URL convention. Connecting lines join successive valid points across missing/rejected windows
+as visual guides; no measurements are interpolated or filled. Each source's latest measurement date appears below the PNG.
 
 Install the standalone analysis dependencies (Python 3.10 or newer):
 
@@ -318,14 +318,15 @@ lifetime**. The failed status and diagnostic files are retained; the selection
 was not relaxed to manufacture a point.
 
 Read-only DAQ05 queries exported 49,393 PRM/analyzer observations from
-2026-09-28 onward. The local overlay includes seven daily PRM means, both
-oxygen channels separately, the O2-only and O2+H2O conversions, 21 previously
-published track measurements, and the new track fit. Short boundary windows
+2026-09-28 onward. The extended local overlay includes 26 daily PRM means from September 5 onward, both
+oxygen channels separately, the O2-only and O2+H2O conversions, and track
+lifetimes independently recalculated from 22 FLOW files. Published numerical
+lifetimes are retained only for corroboration, never as plotted input. Short boundary windows
 were withheld. Accepted windows did not trigger the default exact-value
 plateau check; noisy plateau detection still requires an instrument-appropriate
 `flat_tolerance_ppb` and calibration limits.
 
-The regression suite passed 22 tests, including plateau rejection, calibration
+The regression suite passed 30 tests, including plateau rejection, calibration
 bounds, unit conversion, DST boundaries, duplicate handling, concurrent history
 writers, packet pedestal references, and a PRM-only CLI refresh. The real-data
 PNG was checked at exactly 3000×2000 pixels, and the watcher action was run
@@ -337,8 +338,9 @@ inputs. No NERSC scheduler, DAQ service, or GitHub push was changed by validatio
 
 The overlay now displays an arithmetic mean of accepted per-file track
 lifetimes in each local 00–06, 06–12, 12–18, and 18–24 window, separately for
-each selection. It does not re-fit pooled segments or weight by file size or
-exposure: those quantities are absent from the published legacy history.
+each selection. Each file is fitted directly from its FLOW segment arrays.
+The six-hour summary weights those file estimates equally; it does not re-fit
+segments pooled across files or weight by exposure.
 The original per-file results remain under `lifetimes`; derived displayed
 rows are stored under `plot_lifetimes` with window boundaries, member
 provenance, accepted/rejected counts, and uncertainty components.
@@ -351,8 +353,8 @@ error. A failed-only window remains unavailable. These averages describe
 files with successful fits, not guaranteed coverage of an entire six hours.
 
 Lines match their markers. They are guides between observed estimates, not
-measurements between files. Rejected estimates break lines; missing gas/PRM
-windows also break lines. O2-only estimates use dashed lines and crosses;
+measurements between files. All valid points are connected, including across
+missing or rejected windows. Invalid measurements remain unplotted. O2-only estimates use dashed lines and crosses;
 O2+H2O uses solid lines and squares. Tag 1874 is purple with open squares/plus
 markers; tag 1890 is green with filled squares/x markers. The combined legend
 explicitly names the additional H2O tag 1893. Both conversions remain
@@ -361,9 +363,10 @@ provisional and are not independent measurements of purity.
 
 ### September 29 beam check and published-file provenance
 
-The 21 imported published timestamps were matched one-to-one to distinct
-NERSC per-file plot names. Seventeen are hot-pixel-hunt trials on October 2
-(12:09:44–14:39:22 CDT); their six-hour mean is 1.490 ms, with 0.083 ms
+The 21 reference timestamps were matched one-to-one to distinct NERSC FLOW
+files, whose segment arrays were read directly and independently fitted.
+Seventeen are hot-pixel-hunt trials on October 2 (12:09:44–14:39:22 CDT);
+their independently calculated six-hour mean is 1.489 ms, with 0.084 ms
 between-file SEM. The October 5 inputs are explicitly named induced-noise
 runs. These means combine successful file fits across the stated windows;
 they are not evidence that detector settings were constant or that the
@@ -388,4 +391,98 @@ The raw queries, hashes, FLOW timing summary, macro logs and control outputs
 are retained under sibling `purity_validation/ifbeam/`, including the
 reproducible `check_september29.py` and `september29_beam_check.json`.
 No detector or control-system state was changed. The revised overlay passed
-26 regression tests and was visually checked at 3000×2000 pixels.
+30 regression tests and was visually checked at 3000×2000 pixels.
+
+
+### Direct FLOW inputs and reference-only corroboration
+
+Track history must identify a direct FLOW fit. Existing unprovenanced track
+records are migrated into `reference_lifetimes`, excluded from all means and
+plots. `--reference-history FILE` imports a published JSON only into that
+reference section. `reference_comparisons` matches exact timestamps and the
+corresponding selection, retains unmatched/ambiguous cases, and reports
+per-file differences without replacing or adjusting the calculated result.
+The original per-file fits remain in `lifetimes`; six-hour summaries remain
+in `plot_lifetimes`.
+
+`--input_file` accepts a local FLOW path or an HTTP(S) FLOW URL. Remote inputs
+use conditional HTTP byte-range reads with a strong ETag and an in-memory
+block cache. Only the selected segment datasets needed by the fit are read;
+HDF5 lifetime attributes and published plots/JSON never supply fit values.
+The source URL, ETag, full-file size, dataset shapes/dtypes and SHA-256 hashes
+are retained with each result. `requested_range_bytes` counts requested
+cache blocks (an upper bound on response bytes when the final block is clipped).
+No remote FLOW files are saved by default. `--flow-cache DIRECTORY` optionally
+retains exact segment arrays for subsequent offline fits.
+
+```bash
+../.venv-purity/bin/python actions/lifetime/lifetime.py \
+  --input_file "https://portal.nersc.gov/project/dune/data/2x2/nearline_run3/flowed_charge/ColdCommissioning/20260928_Cosmic/packet-0070002-2026_09_29_07_10_26_CDT.FLOW.hdf5" \
+  --output_file_plot /output/file.lifetime.png \
+  --output_file_json /output/history.json \
+  --output-timeseries /output/elifetime_time_series.png \
+  --reference-history /references/published_json_elifetime.json
+```
+
+All 21 files behind the published reference were independently refitted via
+streaming: all produced finite results, in about 145 seconds, with about
+311 MB of requested ranges versus 427 GB of full files. The fits were made
+from the existing FLOW segment observables, not by repeating hit-level track
+finding in those 21 files. The separate downloaded September 29 09:17 file
+had no segments, so its hit-level selection was run locally as documented
+above. Remote files without selected segments require local full-file
+selection; missing results are never filled from a reference.
+
+The recalculated values are not uniformly identical to the reference: the
+largest difference is September 29 07:10, 1.424 ms recalculated versus 1.829 ms
+published (−22.2%). Repeating the historical `dx != 0` mask on the same arrays
+gives 1.424 ms as well, so the added validity filtering does not explain that
+discrepancy. The published environment and exact input generation are not
+available here. Preserve and review the differences; do not treat the JSON
+comparison as validation of the physics estimator or force agreement.
+
+
+### September 5 extension and Eva comparison
+
+An additional read-only export recovered 594,790 observations from September
+5 to September 28, then combined them with the later snapshots. There are
+26 days with positive recorded PRM lifetimes. Missing days are not filled;
+lines nevertheless connect successive valid means as requested. The local
+PNG and interactive companion cover September 5 through the latest available
+October measurements at 3000×2000 pixels for the PNG.
+
+The entire public Run 3 FLOW tree was inventoried: 330 completed files, the
+first dated September 28 at 17:47:37 CDT. All 62 September 28 files were
+checked for selected-segment datasets and none contained them. No earlier
+track points are inferred from a PNG or JSON. The 70 `.hdf5.tmp` files in
+the inventory are excluded as incomplete outputs. Earlier track monitoring
+requires additional completed FLOW data or full hit-level selection.
+
+`purity_validation/output/eva_corroboration.csv` compares the available
+September 4–10 source-script values with our database-derived daily PRM means
+and six-hour gas estimates. September 5 gives 66.546 µs versus Eva's 66.5 µs;
+September 6 gives 155.699 µs versus 156 µs. September 10 differs (153.400 µs
+daily mean versus the script's 215 µs point), because these are different
+sampling/aggregation choices. The newer month-long PNG source data are not
+available, so it is a visual comparison, not a numeric reconstruction.
+
+The user supplied Brandon How's September 17 10:32 ELog entry: the DF-560
+range changed from **0–10 to 0–1 ppm**, with Ignition already reflecting the
+change. The event is annotated at 10:32 CDT; no extra factor-of-ten scaling
+is applied to the archive. This corrects the `ppb` wording in the reference
+image's annotation without guessing a different historical concentration.
+
+Eva-style grey shading marks the approximate September 17–28 PRM signal-
+concern interval visible in her image. It is reference context, not a data-
+quality mask. The PRM table supplies peak/time diagnostics but no explicit
+quality flag, and a validated waveform cut is not available. Positive
+recorded lifetimes are therefore retained with daily SEM; especially within
+that interval, they should not be assumed to be signal-validated measurements.
+No numeric point was digitized from the image.
+
+Use `--annotations FILE` for sourced timestamp/label entries and optional
+`end` spans. Annotations are retained in history and survive later refreshes;
+both PNG and HTML show them. The range-change event and approximate shading
+are stored in `purity_validation/output/event_annotations.json`. The related
+`september_extension_summary.json`, `flow_corroboration.csv`, and raw query
+snapshots document the comparison and its limits.
