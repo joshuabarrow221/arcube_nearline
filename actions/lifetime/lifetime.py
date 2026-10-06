@@ -189,6 +189,77 @@ def record_key(entry):
     return method, entry.get('input_file', entry['timestamp']), entry.get('sample', 'mixed')
 
 
+def valid_lifetime(entry):
+    value, error = entry.get('lifetime_us'), entry.get('error_us')
+    return (entry.get('fit_status', 'ok') == 'ok' and value is not None
+            and np.isfinite(value) and value > 0
+            and (error is None or (np.isfinite(error) and error >= 0)))
+
+
+def aggregate_track_lifetimes(entries, timezone_name='America/Chicago'):
+    """Equal-weight means of per-file track fits in local six-hour windows.
+
+    Preserve method/selection separation and member provenance. This is a
+    summary of fitted lifetimes, not a pooled-segment refit or exposure mean.
+    """
+    from collections import defaultdict
+    import pandas as pd
+    from purity_sources import aware_time
+    groups, output = defaultdict(list), []
+    unique = {record_key(row): row for row in entries}
+    for row in unique.values():
+        if row.get('method', 'track') != 'track':
+            output.append(row)
+            continue
+        stamp = aware_time(row['timestamp']).tz_convert(timezone_name)
+        start = (stamp.tz_localize(None).normalize() + pd.Timedelta(hours=6*(stamp.hour//6))).tz_localize(timezone_name)
+        groups[(row.get('sample', 'mixed'), start)].append(row)
+    for (sample, start), members in sorted(groups.items()):
+        end = (start.tz_localize(None)+pd.Timedelta(hours=6)).tz_localize(timezone_name)
+        accepted = [r for r in members if valid_lifetime(r)]
+        values = np.array([r['lifetime_us'] for r in accepted], dtype=float)
+        errors = [r.get('error_us') for r in accepted]
+        n = len(accepted)
+        propagated = float(np.linalg.norm(errors)/n) if n and all(e is not None for e in errors) else None
+        scatter_sem = float(values.std(ddof=1)/np.sqrt(n)) if n > 1 else None
+        available_errors = [e for e in (propagated, scatter_sem) if e is not None]
+        output.append(dict(timestamp=(start+(end-start)/2).isoformat(),
+            period_start=start.isoformat(), period_end=end.isoformat(),
+            sample=sample, method='track', aggregation='arithmetic mean of per-file lifetimes, six-hour local windows',
+            lifetime_us=float(values.mean()) if n else None,
+            error_us=max(available_errors) if available_errors else None,
+            propagated_fit_error_us=propagated, between_file_sem_us=scatter_sem,
+            uncertainty='larger of propagated independent fit errors and between-file SEM, where available; excludes shared systematics',
+            fit_status='ok' if n else 'unavailable', n_measurements=n,
+            n_rejected=len(members)-n,
+            first_observed_at=min((r['timestamp'] for r in accepted), key=aware_time) if n else None,
+            last_observed_at=max((r['timestamp'] for r in accepted), key=aware_time) if n else None,
+            members=[dict(timestamp=r['timestamp'], input_file=r.get('input_file') or r.get('published_input_basename'),
+                          published_plot_url=r.get('published_plot_url'), run_context=r.get('run_context'),
+                          fit_status=r.get('fit_status', 'ok'), lifetime_us=r.get('lifetime_us'),
+                          error_us=r.get('error_us')) for r in members]))
+    return output
+
+
+def connected_values(rows):
+    """Break lines at rejected estimates and missing slow-controls windows."""
+    from purity_sources import aware_time
+    times, values = [], []
+    previous = None
+    for row in sorted(rows, key=lambda r: aware_time(r['timestamp'])):
+        if not valid_lifetime(row):
+            times.append(row['timestamp']); values.append(None)
+            previous = None
+            continue
+        if (previous and row.get('method') in ('gas', 'gas_o2', 'prm')
+                and previous.get('period_end') and row.get('period_start')
+                and aware_time(previous['period_end']) != aware_time(row['period_start'])):
+            times.append(row['timestamp']); values.append(None)
+        times.append(row['timestamp']); values.append(row['lifetime_us'])
+        previous = row
+    return times, values
+
+
 def update_json(output_file_json, results, output_timeseries=None, timezone_name='America/Chicago', annotations=None):
     """Serialize read/update/render so concurrent workers cannot publish stale history."""
     from datetime import timedelta
@@ -199,7 +270,8 @@ def update_json(output_file_json, results, output_timeseries=None, timezone_name
         data = json.loads(path.read_text()) if path.exists() else {'lifetimes': []}
         indexed = {record_key(row): row for row in data['lifetimes']}
         indexed.update({record_key(row): row for row in results})
-        data.update(schema_version=2, lifetimes=list(indexed.values()))
+        data.update(schema_version=3, lifetimes=list(indexed.values()))
+        data['plot_lifetimes'] = aggregate_track_lifetimes(data['lifetimes'], timezone_name)
         atomic_json(path, data)
         if output_timeseries:
             draw_overlay(data['lifetimes'], output_timeseries, timezone_name, annotations)
@@ -209,11 +281,11 @@ def update_json(output_file_json, results, output_timeseries=None, timezone_name
 LABELS = {
     'gas_o2': ('O₂-only gas equivalent · 6 h (provisional)', '#AAB965', 'x'),
     'prm': ('Purity monitor · daily mean', '#2878B5', 'o'),
-    'gas': ('Gas analyser · 6 h equivalent (provisional)', '#819B28', 's'),
-    'beam': ('Externally triggered muon candidates', '#CB7B21', '^'),
-    'cosmic': ('Off-beam / cosmic-enriched candidates', '#AA4D83', 'v'),
-    'all_mip': ('All selected through-going MIP candidates', '#444444', 'D'),
-    'mixed': ('Published mixed muon candidates', '#777777', 'o'),
+    'gas': ('O₂ + H₂O gas equivalent · 6 h (provisional)', '#819B28', 's'),
+    'beam': ('Externally triggered muon candidates · 6 h mean', '#CB7B21', '^'),
+    'cosmic': ('Off-beam / cosmic-enriched candidates · 6 h mean', '#AA4D83', 'v'),
+    'all_mip': ('All selected through-going MIP candidates · 6 h mean', '#444444', 'D'),
+    'mixed': ('Published mixed muon candidates · 6 h mean', '#777777', 'o'),
     'packet': ('Packets · whole detector (provisional)', '#28A1A1', 'P'),
 }
 
@@ -229,31 +301,39 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
     import plotly.graph_objects as go
 
     groups = defaultdict(list)
-    failed = 0
-    for entry in entries:
-        value, error = entry.get('lifetime_us'), entry.get('error_us')
-        if (entry.get('fit_status', 'ok') != 'ok' or value is None or
-                not np.isfinite(value) or value <= 0 or
-                (error is not None and (not np.isfinite(error) or error < 0))):
-            failed += 1
-            continue
+    failed = sum(not valid_lifetime(entry) for entry in entries)
+    for entry in aggregate_track_lifetimes(entries, timezone_name):
         sample = entry.get('sample', 'mixed')
         groups[(sample, entry.get('source', '') if sample in ('prm', 'gas', 'gas_o2') else '')].append(entry)
     fig, ax = plt.subplots(figsize=(15, 10), dpi=200)
     interactive = go.Figure()
     tz = ZoneInfo(timezone_name)
-    for (sample, source), rows in sorted(groups.items()):
-        rows.sort(key=lambda r: aware_time(r['timestamp']))
+    for (sample, source), all_rows in sorted(groups.items()):
+        rows = sorted((r for r in all_rows if valid_lifetime(r)), key=lambda r: aware_time(r['timestamp']))
+        if not rows:
+            continue
         label, color, marker = LABELS.get(sample, (sample, '#777777', 'o'))
-        if source:
+        if sample in ('gas', 'gas_o2'):
+            label = ('O₂ + H₂O' if sample == 'gas' else 'O₂ only') + ' equivalent · 6 h'
+            label += f' ({source}'
+            if sample == 'gas':
+                label += '; ' + str(rows[0].get('water_source') or 'H₂O source unspecified')
+            label += ')'
+        elif source:
             label += f' ({source})'
         open_marker = '1874' in source
+        if sample in ('gas', 'gas_o2') and open_marker:
+            color = '#8060A6' if sample == 'gas' else '#AD92CC'
         if sample == 'gas_o2' and open_marker:
             marker = '+'
         times = [aware_time(row['timestamp']).to_pydatetime().astimezone(tz) for row in rows]
         values = [row['lifetime_us'] for row in rows]
         errors = [row.get('error_us') for row in rows]
-        # Markers do not interpolate through missing measurements or fit failures.
+        line_times, line_values = connected_values(all_rows)
+        linestyle = '--' if sample == 'gas_o2' else '-'
+        ax.plot([aware_time(t).to_pydatetime().astimezone(tz) for t in line_times],
+                [np.nan if v is None else v for v in line_values],
+                linestyle=linestyle, color=color, linewidth=1, alpha=0.8)
         ax.plot(times, values, linestyle='none', marker=marker, color=color,
                 markersize=5, alpha=0.85, label=label,
                 markerfacecolor='none' if open_marker else color)
@@ -261,17 +341,24 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
         if indices:
             ax.errorbar([times[i] for i in indices], [values[i] for i in indices],
                         yerr=[errors[i] for i in indices], fmt='none', color=color, capsize=2, alpha=0.6)
+        symbols = {'beam':'triangle-up', 'cosmic':'triangle-down', 'all_mip':'diamond', 'packet':'cross'}
+        symbol = (('square-open' if open_marker else 'square') if sample == 'gas' else
+                  ('cross' if open_marker else 'x') if sample == 'gas_o2' else symbols.get(sample, 'circle'))
         details = [f"{row.get('uncertainty', 'fit covariance uncertainty')}<br>"
-                   f"{row.get('fit_quality', '')}<br>"
-                   f"n={row.get('n_segments', row.get('n_measurements', 'unknown'))}" for row in rows]
+                   f"n={row.get('n_measurements', row.get('n_segments', 'unknown'))}<br>"
+                   f"{row.get('period_start', '')} — {row.get('period_end', '')}" for row in rows]
+        interactive.add_trace(go.Scatter(x=[aware_time(t).isoformat() for t in line_times],
+            y=line_values, mode='lines', line=dict(color=color, width=1, dash='dash' if sample=='gas_o2' else 'solid'),
+            legendgroup=label, showlegend=False, hoverinfo='skip', connectgaps=False))
         interactive.add_trace(go.Scatter(x=[aware_time(r['timestamp']).isoformat() for r in rows],
-            y=values, mode='markers', name=label, marker=dict(color=color, symbol=('square-open' if open_marker else 'square') if sample == 'gas' else ('cross' if open_marker else 'x') if sample == 'gas_o2' else 'circle'),
+            y=values, mode='markers', name=label, legendgroup=label, marker=dict(color=color, symbol=symbol),
             error_y=dict(type='data', array=errors, visible=True), text=details,
             hovertemplate='%{x}<br>%{y:.3f} µs<br>%{text}<extra>%{fullData.name}</extra>'))
     fig.suptitle('DUNE ND Prototype 2×2 · liquid argon purity', fontsize=15)
     ax.set(xlabel=f'Date ({timezone_name})', ylabel='Electron lifetime [µs]')
     ax.set_ylim(bottom=0)
     ax.grid(alpha=0.18)
+    groups = {key: [r for r in rows if valid_lifetime(r)] for key, rows in groups.items() if any(valid_lifetime(r) for r in rows)}
     if groups:
         ax.legend(loc='lower center', bbox_to_anchor=(0.5, 1.015), fontsize=8,
                   framealpha=0.9, ncol=2 if len(groups)>3 else 1)
@@ -291,8 +378,9 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
     latest = '; '.join(f"{LABELS.get(s, (s,))[0].split(' ·')[0]}: "
                        f"{max(aware_time(r.get('last_observed_at') or r['timestamp']) for r in rows).tz_convert(timezone_name):%m-%d %H:%M %Z}"
                        for (s, _), rows in sorted(groups.items()))
-    note = ('PRM bars: daily SEM. Track bars: fit covariance. Gas/packet bars absent when unavailable.\n'
-            'Gas conversion and packet selections are provisional. No interpolation across missing data.\n'
+    note = ('PRM bars: daily SEM. Tracks: 6 h file means; bars = max(propagated fit error, between-file SEM), where available.\n'
+            'Gas conversion/packet selections provisional. Lines guide the eye; breaks mark rejected estimates or missing slow-controls windows.\n'
+            'External triggers do not establish beam origin.\n'
             f'Failed/unavailable entries retained in JSON: {failed}. Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}.')
     import textwrap
     fig.text(0.08, 0.045, note + '\nLatest accepted data: ' + '\n'.join(textwrap.wrap(latest, 145)), fontsize=8, va='bottom')

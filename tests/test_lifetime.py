@@ -267,3 +267,47 @@ def test_latest_observation_is_not_averaging_midpoint(tmp_path):
     values=aggregate_measurements([snapshot(tmp_path,[row('prm_lifetime',.001,'2026-09-29T01:00:00-05:00')])])
     assert values[0]['timestamp'] != values[0]['last_observed_at']
     assert aware_time(values[0]['last_observed_at']) == aware_time('2026-09-29T01:00:00-05:00')
+
+
+def test_six_hour_track_means_preserve_samples_and_raw_history(tmp_path):
+    def entry(file, value, error, sample='mixed', timestamp='2026-10-02T12:10:00-05:00'):
+        return dict(input_file=file, timestamp=timestamp, lifetime_us=value,
+                    error_us=error, sample=sample, method='track', fit_status='ok')
+    rows=[entry('a',1000,30),entry('b',1400,40),entry('beam',1700,60,'beam'),
+          dict(entry('failed',None,None),fit_status='failed')]
+    path=tmp_path/'history.json'
+    lifetime.update_json(path,rows)
+    data=json.loads(path.read_text())
+    assert data['lifetimes']==rows
+    mixed=next(r for r in data['plot_lifetimes'] if r['sample']=='mixed')
+    assert mixed['lifetime_us']==1200 and mixed['n_measurements']==2
+    assert mixed['n_rejected']==1
+    assert mixed['propagated_fit_error_us']==25
+    assert mixed['between_file_sem_us']==pytest.approx(200)
+    assert mixed['error_us']==pytest.approx(200)
+    assert len(mixed['members'])==3
+    assert mixed['period_start']=='2026-10-02T12:00:00-05:00'
+    assert mixed['timestamp']=='2026-10-02T15:00:00-05:00'
+    assert mixed['last_observed_at']=='2026-10-02T12:10:00-05:00'
+    assert len(lifetime.aggregate_track_lifetimes(rows+[rows[0]]))==2
+
+
+@pytest.mark.parametrize('date,offset,hours',[('2026-03-08','-06:00',5),('2026-11-01','-05:00',7)])
+def test_track_six_hour_windows_follow_local_dst(date,offset,hours):
+    rows=lifetime.aggregate_track_lifetimes([dict(timestamp=date+'T00:30:00'+offset,lifetime_us=1000,error_us=None)])
+    assert (aware_time(rows[0]['period_end'])-aware_time(rows[0]['period_start'])).total_seconds()==hours*3600
+    assert rows[0]['error_us'] is None
+
+
+def test_lines_break_at_rejected_and_missing_gas_windows():
+    def gas(hour,value):
+        return dict(timestamp=f'2026-10-02T{hour+3:02d}:00:00Z',method='gas',
+                    period_start=f'2026-10-02T{hour:02d}:00:00Z',
+                    period_end=f'2026-10-02T{hour+6:02d}:00:00Z',lifetime_us=value)
+    valid=gas(0,100)
+    rejected=dict(gas(6,None),fit_status='unavailable')
+    last=gas(12,120)
+    assert lifetime.connected_values([valid,rejected,last])[1]==[100,None,120]
+    assert lifetime.connected_values([valid,last])[1]==[100,None,120]
+    adjacent=gas(6,110)
+    assert lifetime.connected_values([valid,adjacent])[1]==[100,110]

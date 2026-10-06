@@ -43,8 +43,8 @@ nearline worker.
 snapshots, querying databases, updating history, and rendering the overlay.
 `lifetime_timeseries.py` remains a compatibility wrapper. The default PNG is
 exactly **3000 × 2000 pixels**; the companion is `<plot>.png.html`, retaining the
-existing shifter URL convention. Marker-only series do not interpolate across
-gaps. Each source's latest measurement date appears below the PNG.
+existing shifter URL convention. Connecting lines guide the eye; rejected estimates and missing slow-controls
+windows break the lines. Each source's latest measurement date appears below the PNG.
 
 Install the standalone analysis dependencies (Python 3.10 or newer):
 
@@ -332,3 +332,60 @@ PNG was checked at exactly 3000×2000 pixels, and the watcher action was run
 locally without muon data. The environment passed `pip check`. Artifacts and
 inputs are under the sibling `purity_validation/` directory and are not Git
 inputs. No NERSC scheduler, DAQ service, or GitHub push was changed by validation.
+
+### Six-hour track summaries and connecting lines
+
+The overlay now displays an arithmetic mean of accepted per-file track
+lifetimes in each local 00–06, 06–12, 12–18, and 18–24 window, separately for
+each selection. It does not re-fit pooled segments or weight by file size or
+exposure: those quantities are absent from the published legacy history.
+The original per-file results remain under `lifetimes`; derived displayed
+rows are stored under `plot_lifetimes` with window boundaries, member
+provenance, accepted/rejected counts, and uncertainty components.
+
+Track error bars are the larger of the propagated independent fit errors
+`sqrt(sum(sigma_i**2))/n` and the between-file SEM, where available. This keeps
+large observed file-to-file scatter visible; shared calibration systematics
+and correlations are not estimated. A singleton retains its original fit
+error. A failed-only window remains unavailable. These averages describe
+files with successful fits, not guaranteed coverage of an entire six hours.
+
+Lines match their markers. They are guides between observed estimates, not
+measurements between files. Rejected estimates break lines; missing gas/PRM
+windows also break lines. O2-only estimates use dashed lines and crosses;
+O2+H2O uses solid lines and squares. Tag 1874 is purple with open squares/plus
+markers; tag 1890 is green with filled squares/x markers. The combined legend
+explicitly names the additional H2O tag 1893. Both conversions remain
+provisional and are not independent measurements of purity.
+
+
+### September 29 beam check and published-file provenance
+
+The 21 imported published timestamps were matched one-to-one to distinct
+NERSC per-file plot names. Seventeen are hot-pixel-hunt trials on October 2
+(12:09:44–14:39:22 CDT); their six-hour mean is 1.490 ms, with 0.083 ms
+between-file SEM. The October 5 inputs are explicitly named induced-noise
+runs. These means combine successful file fits across the stated windows;
+they are not evidence that detector settings were constant or that the
+observed variation was entirely a purity change.
+
+The newly processed September 29 FLOW file spans 09:17:11.606–09:18:07.808
+CDT and has 1,221 events with external triggers. Its 15 accepted tracks
+provide the 1.632 ± 0.149 ms result. The `beam` sample key means only
+`n_ext_trigs > 0`, as documented by `RockMuonSelection`; it does not imply an
+IFBeam match or physical rock-muon origin.
+
+Read-only IFBeam queries returned HTTP 200 with zero NuMI `$A9` records for
+all 15 real devices used by `beam_quality/get_data.cpp` throughout September
+29 (local midnight to midnight). The existing macro was run unchanged. A
+July 12, 2024 00:01–00:02 CDT control returned 46 spills, all passing its
+cuts 1–5. September 29 therefore has **no IFBeam-confirmed beam** in this
+check. With no spills, beam quality and detector-to-spill coincidence are
+not evaluable; missing archive rows are not measured zero POT. The existing
+horn cut is FHC-specific and requires polarity validation for future runs.
+
+The raw queries, hashes, FLOW timing summary, macro logs and control outputs
+are retained under sibling `purity_validation/ifbeam/`, including the
+reproducible `check_september29.py` and `september29_beam_check.json`.
+No detector or control-system state was changed. The revised overlay passed
+26 regression tests and was visually checked at 3000×2000 pixels.
