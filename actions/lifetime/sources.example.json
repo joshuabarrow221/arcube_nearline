@@ -1,0 +1,56 @@
+{
+  "sources": [
+    {
+      "name": "PSQL PRM",
+      "kind": "postgres",
+      "url_env": "PURITY_PSQL_URL",
+      "table": "prm_table",
+      "column": "prm_lifetime",
+      "naive_timezone": "UTC",
+      "quantity": "prm_lifetime",
+      "unit": "s"
+    },
+    {
+      "name": "Ignition H2O tag 1893",
+      "kind": "ignition_function",
+      "url_env": "PURITY_IGNITION_URL",
+      "function": "query_cryo_float",
+      "tag_id": 1893,
+      "naive_timezone": "UTC",
+      "quantity": "h2o",
+      "unit": "ppb"
+    },
+    {
+      "name": "Ignition O2 ppb tag 1890",
+      "kind": "ignition_function",
+      "url_env": "PURITY_IGNITION_URL",
+      "function": "query_cryo_float",
+      "tag_id": 1890,
+      "naive_timezone": "UTC",
+      "quantity": "o2",
+      "unit": "ppb"
+    },
+    {
+      "name": "Ignition O2 ppm tag 1874",
+      "kind": "ignition_function",
+      "url_env": "PURITY_IGNITION_URL",
+      "function": "query_cryo_float",
+      "tag_id": 1874,
+      "naive_timezone": "UTC",
+      "quantity": "o2",
+      "unit": "ppm",
+      "use_for_lifetime": true
+    },
+    {
+      "name": "Ignition N2 tag 1871",
+      "kind": "ignition_function",
+      "url_env": "PURITY_IGNITION_URL",
+      "function": "query_cryo_float",
+      "tag_id": 1871,
+      "naive_timezone": "UTC",
+      "quantity": "n2",
+      "unit": "ppm",
+      "use_for_lifetime": false
+    }
+  ]
+}

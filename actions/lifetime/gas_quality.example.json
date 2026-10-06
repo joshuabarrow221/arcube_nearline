@@ -1,0 +1,9 @@
+{
+  "minimum_span_hours": 3,
+  "plateau_hours": 3,
+  "max_gap_minutes": 30,
+  "flat_tolerance_ppb": 0,
+  "minimum_ppb": 0,
+  "maximum_ppb": null,
+  "sources": {}
+}

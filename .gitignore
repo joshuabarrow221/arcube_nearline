@@ -3,3 +3,9 @@ my_launchpad.yaml
 _install
 __pycache__
 pyrightconfig.json
+
+# Local purity validation outputs and credentials
+__pycache__/
+.pytest_cache/
+*.pyc
+actions/lifetime/sources.local.json

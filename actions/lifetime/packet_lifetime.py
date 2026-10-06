@@ -33,6 +33,7 @@ ROLLOVER = 10_000_000
 def args():
     p = argparse.ArgumentParser()
     p.add_argument("packet_file")
+    p.add_argument("--detector-wide", action="store_true", help="Pool all IO groups before drift-bin MPV fitting")
     p.add_argument("--ped", default=None)
     p.add_argument("--outdir", default=None)
     p.add_argument("--chunk", type=int, default=2_000_000)
@@ -168,8 +169,9 @@ def choose_ext(tim, mclk, data_sorted, trigger_type):
         rows.append(dict(io_group=int(io), n_triggers=len(tt), pre_per_trigger=pre,
                          post_per_trigger=post, excess_per_trigger=post-pre,
                          post_over_pre=(post/pre if pre>0 else np.inf)))
+    if not rows:
+        raise RuntimeError("No usable EXT stream with at least 10 triggers")
     d = pd.DataFrame(rows).sort_values(["excess_per_trigger","post_over_pre"], ascending=False)
-    if len(d)==0: raise RuntimeError("No usable EXT stream")
     return int(d.iloc[0].io_group), d
 
 def dt_hist(data, trig, lo_us=-100, hi_us=300, bin_us=2):
@@ -228,8 +230,12 @@ def common_fit(d, tmin, tmax):
     ii=np.array([lookup[x] for x in d.io_group])
     def resid(p):
         return (q-p[1:][ii]*np.exp(-p[0]*t))/e
+    if len(d) <= 1 + len(ios) or d.time_us.nunique() < 3:
+        raise ValueError("Insufficient independent MPV bins for lifetime fit")
     A0=[d.loc[d.io_group==io,"mpv"].median() for io in ios]
     r=least_squares(resid,[.5]+A0,bounds=([-5]+[0]*len(ios),[5]+[50]*len(ios)),max_nfev=10000)
+    if not r.success or np.any(r.active_mask):
+        raise ValueError("Attenuation fit failed or reached a parameter boundary")
     alpha=float(r.x[0]); chi2=float(np.sum(resid(r.x)**2)); ndf=len(d)-(1+len(ios))
     return alpha,{int(io):float(r.x[i+1]) for i,io in enumerate(ios)},chi2,ndf,chi2/ndf,d
 
@@ -257,6 +263,8 @@ def common_fit_unweighted(d, tmin, tmax):
         raise RuntimeError("No MPV points are available for the unweighted common fit.")
 
     ios = sorted(d["io_group"].unique())
+    if len(d) <= 1 + len(ios) or d.time_us.nunique() < 3:
+        raise ValueError("Insufficient independent MPV bins for lifetime fit")
     io_to_index = {io: i for i, io in enumerate(ios)}
 
     t_ms = d["time_us"].to_numpy() / 1000.0
@@ -284,6 +292,8 @@ def common_fit_unweighted(d, tmin, tmax):
         max_nfev=10_000,
     )
 
+    if not result.success or np.any(result.active_mask):
+        raise ValueError("Attenuation fit failed or reached a parameter boundary")
     alpha = float(result.x[0])
     amplitudes = {
         int(io): float(result.x[i + 1])
@@ -301,7 +311,7 @@ def main():
     packet=Path(a.packet_file).expanduser().resolve()
     if not packet.exists(): raise SystemExit(f"Missing {packet}")
     ped=Path(a.ped).expanduser().resolve() if a.ped else find_ped(packet)
-    if ped is None or not ped.exists():
+    if a.ped_source == "panel" and (ped is None or not ped.exists()):
         raise SystemExit("Pedestal JSON not found automatically; pass --ped PATH")
     out=Path(a.outdir).expanduser().resolve() if a.outdir else packet.parent/f"{packet.stem}_lifetime"
     out.mkdir(parents=True,exist_ok=True)
@@ -370,6 +380,8 @@ def main():
             md=z["packet_type"]==0; nd=int(md.sum()); use=drift[cursor:cursor+nd]; q=z[md]
             if use.any(): parts.append(q[use][["io_group","io_channel","chip_id","channel_id","dataword"]])
             cursor+=nd
+        if not parts:
+            raise RuntimeError("No charge packets in the selected EXT drift window")
         selected=np.concatenate(parts)
         sel_dt=dt_us[drift]; sel_ext=ext_index[drift]
 
@@ -433,17 +445,8 @@ def main():
         #
         # This does NOT use FLOW event building, corrected charge,
         # reconstructed t0, or Y-Z information.
-        from packet_lifetime_final import (
-            flow_ped_map,
-            key as flow_key,
-            KE_PER_ADC,
-        )
-
-        lookup = flow_ped_map(
-            flow,
-            KE_PER_ADC,
-            chunk=1_000_000,
-        )
+        from packet_pedestal import flow_ped_map, key as flow_key
+        lookup = flow_ped_map(flow)
 
         print("FLOW pedestal channels:", len(lookup))
 
@@ -631,11 +634,19 @@ def main():
         errors="ignore",
     )
     sc.to_pickle(out/"slice_charge.pkl"); fit.to_pickle(out/"fit_sample.pkl")
+    if fit.empty:
+        raise RuntimeError("No charge objects survive packet selection")
 
     plt.figure(figsize=(10,6)); plt.hist2d(fit.time_us,fit.q_sum,
         bins=[np.arange(0,a.drift_max_us+a.time_bin_us,a.time_bin_us),np.arange(0,50.5,.5)],norm=LogNorm())
     plt.xlabel(r"$\Delta t_{\mathrm{last\ hit}-EXT}$ [$\mu$s]"); plt.ylabel(r"$\sum |ADC-P|$ [ADC]")
     plt.colorbar(label="objects"); plt.tight_layout(); plt.savefig(out/"charge_map.png",dpi=150); plt.close()
+
+    # Pool charge objects only AFTER grouping on their real physical channels.
+    # IO=0 is a fit label, never a physical-channel address.
+    if a.detector_wide:
+        fit = fit.copy()
+        fit['io_group'] = 0
 
     # IO/time Langau
     rows=[]
@@ -838,7 +849,10 @@ def main():
 
     summary = dict(
         packet_file=str(packet),
-        pedestal_file=str(ped),
+        pedestal_file=str(ped) if ped else None,
+        pedestal_source=a.ped_source,
+        flow_file=a.flow_file,
+        aggregation="detector-wide pooled charge" if a.detector_wide else "common attenuation with per-IO amplitudes",
         packet_type_counts=dict(pt),
         ext_io_group=int(ext_io),
         ext_trigger_type=int(a.ext_trigger_type),
@@ -846,10 +860,11 @@ def main():
         n_selected_packets=int(len(df)),
         pedestal_coverage=coverage,
         time_bin_us=a.time_bin_us,
-        charge_convention="sum of abs(ADC-pedestal) over successive channel hits [PROVISIONAL sign]",
+        charge_convention=f"sum of {a.charge_mode} over successive channel hits [PROVISIONAL selection]",
         successive_hit_grouping=(
-            "same EXT + same physical channel; split when consecutive "
-            f"hit separation exceeds {a.successive_gap_us} us"
+            (f"same EXT + same physical channel; spacing {a.successive_min_ticks}-{a.successive_max_ticks} ticks"
+             if a.successive_min_ticks is not None and a.successive_max_ticks is not None
+             else f"same EXT + same physical channel; maximum gap {a.successive_gap_us} us")
         ),
         summed_object_time_reference="last successive hit",
         successive_gap_us=float(a.successive_gap_us),

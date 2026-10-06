@@ -71,9 +71,7 @@ def langau_fit(hist, bin_centers):
 
     except RuntimeError as e:
         print(f'Fitting failed: {e}')
-        params = initial_guess
-        mpv,eta,sigma, A = params[0], params[1], params[2], params[3]
-        mpv_uncertainty = 0
+        raise ValueError("Landau-Gaussian slice fit did not converge") from e
 
 
     return mpv, eta, sigma, A, mpv_uncertainty, mpv_guess
@@ -100,6 +98,8 @@ def langau_lifetime(nhits, dqdx, time_drifted, time_bins, dqdx_bins, nhits_bins,
         dq_dx = dqdx[mask]
         
         hits = nhits[mask]
+        if len(hits) < 5 or not np.any((hits >= nhits_bins[0]) & (hits <= nhits_bins[-1])) or not np.any((dq_dx >= dqdx_bins[0]) & (dq_dx <= dqdx_bins[-1])):
+            raise ValueError(f"Insufficient histogram support in drift bin {i}")
 
         hist_a, edges_a = np.histogram(hits, bins=nhits_bins, density=True)
         hist_b, edges_b = np.histogram(dq_dx, bins=dqdx_bins, density=True)      
@@ -126,6 +126,8 @@ def langau_lifetime(nhits, dqdx, time_drifted, time_bins, dqdx_bins, nhits_bins,
         mpv_uncertainties[i] = mpv_uncertainty
 
     #Get Electron Lifetime
+    if not np.all(np.isfinite(mpvs[fit_points:-1])) or not np.all(np.isfinite(mpv_uncertainties[fit_points:-1])) or np.any(mpv_uncertainties[fit_points:-1] <= 0):
+        raise ValueError("Invalid drift-bin MPV uncertainty")
     params, cov = curve_fit(ElectronLifetimeFunc, times[fit_points:-1], mpvs[fit_points:-1], bounds = ([0, .0,], [np.inf, np.inf]), 
                             p0 = [np.max(mpvs), 2000], sigma=mpv_uncertainties[fit_points:-1], absolute_sigma=True)
 
@@ -144,8 +146,8 @@ def langau_lifetime(nhits, dqdx, time_drifted, time_bins, dqdx_bins, nhits_bins,
                marker=r"$\circ$", color='black', label='Fitted')
     ax.scatter(times[:fit_points], mpvs[:fit_points],
                marker=r"$\circ$", color='grey', label='Not Fitted')
-    ax.plot(x_fit, fit_curve, color='orange',label=f'$e^{{-}}$ lifetime = {params[1]:.4f} $\pm$ {np.sqrt(cov[1,1]):.4f} [μs] \n $dQ_{{0}}/dx$ \
-            = {params[0]:.4} $\pm$ {np.sqrt(cov[0,0]):.4f} [$ke^{{-}}/cm$] \n $\chi^{2}/ndf = {chi2/len(mpvs[fit_points:])}$')
+    ax.plot(x_fit, fit_curve, color='orange',label=f'$e^{{-}}$ lifetime = {params[1]:.4f} $\\pm$ {np.sqrt(cov[1,1]):.4f} [μs] \n $dQ_{{0}}/dx$ \
+            = {params[0]:.4} $\\pm$ {np.sqrt(cov[0,0]):.4f} [$ke^{{-}}/cm$] \n $\\chi^{2}/ndf = {chi2/len(mpvs[fit_points:])}$')
     
     #Axis titles
     ax.set_ylabel(r"MPV of ($\frac{dN}{dx}$ * $\frac{dQ}{dx}$)")
