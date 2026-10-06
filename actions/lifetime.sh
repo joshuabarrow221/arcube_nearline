@@ -33,5 +33,12 @@ fi
 
 mkdir -p "$(dirname "$plotpath")" "$(dirname "$logpath")" "$(dirname "$jsonpath")" 
 
-python lifetime.py --input_file "$inpath" --output_file_plot "$plotpath"  --output_file_json "$jsonpath" 2>&1 | tee "$logpath"
-python lifetime_timeseries.py --input_file "$jsonpath" --output_file "$globalplotpath" 2>&1 |tee "$logpath"
+metadata_args=()
+if [[ "${ARCUBE_NEARLINE_WRITE_LIFETIME_METADATA:-0}" == "1" ]]; then
+    metadata_args+=(--write-hdf5-metadata)
+fi
+
+python lifetime.py --input_file "$inpath" --output_file_plot "$plotpath" \
+    --output_file_json "$jsonpath" "${metadata_args[@]}" 2>&1 | tee "$logpath"
+python lifetime_timeseries.py --input_file "$jsonpath" --output_file "$globalplotpath" \
+    2>&1 | tee -a "$logpath"

@@ -34,7 +34,9 @@ workflow2='yamls/proto_nd_flow/workflows/charge/charge_event_reconstruction_data
 workflow3='yamls/proto_nd_flow/workflows/combined/combined_reconstruction_data.yaml'
 workflow4='yamls/proto_nd_flow/workflows/charge/prompt_calibration_data_Run2.yaml'
 workflow5='yamls/proto_nd_flow/workflows/charge/final_calibration_data.yaml'
-workflow6='yamls/proto_nd_flow/workflows/rock_muon_selection_data.yaml'
+# Keep the production workflow as the default. For beam/cosmic lifetime tests,
+# set this to rock_muon_selection_beam_cosmic_data.yaml in the worker environment.
+workflow6=${ARCUBE_NEARLINE_MUON_WORKFLOW:-yamls/proto_nd_flow/workflows/rock_muon_selection_data.yaml}
 
 rm -f "$flowpath" "$flowpath.tmp"
 
