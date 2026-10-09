@@ -40,6 +40,10 @@ def load_config(path):
         raise ValueError('private state and public plots must not contain each other')
     config.setdefault('timezone', 'America/Chicago')
     ZoneInfo(config['timezone'])  # Fail at startup for an invalid timezone.
+    # Window boundaries and display clock are separate decisions. Shifters
+    # can compare UTC across detector systems without moving a PRM day or pool.
+    config.setdefault('display_timezone', config['timezone'])
+    ZoneInfo(config['display_timezone'])
     config.setdefault('window_hours', 6)
     if config['window_hours'] != 6:
         raise ValueError('this deployment profile uses fixed six-hour detector windows')

@@ -51,7 +51,9 @@ def observed_time(row):
 
 
 def render(payload, directory, config):
-    directory = Path(directory); tz = ZoneInfo(config['timezone'])
+    directory = Path(directory)
+    display_timezone = config.get('display_timezone', config['timezone'])
+    tz = ZoneInfo(display_timezone)
     rows = payload['lifetimes']
     raw_prm = payload.get('raw_prm_measurements', [])
     # Locate daily PRM means at their actual measurement-time centroid. Keep
@@ -117,7 +119,7 @@ def render(payload, directory, config):
     # Place the title in figure coordinates, above the two-row legend; an axes
     # title with padding would collide with that legend on the exported PNG.
     fig.suptitle('2×2 Electron Lifetime',fontsize=22,y=.975)
-    ax.set_ylabel('Electron lifetime [µs]',fontsize=16); ax.set_xlabel('Date · '+config['timezone'],fontsize=14)
+    ax.set_ylabel('Electron lifetime [µs]',fontsize=16); ax.set_xlabel('Date · '+display_timezone,fontsize=14)
     ax.tick_params(labelsize=12);ax.grid(color='#EBF0F8',lw=.8);ax.set_axisbelow(True)
     # Use the available vertical space while keeping the fixed diagnostic cap.
     # Error bars participate in scaling; this never changes fit acceptance or
@@ -135,13 +137,14 @@ def render(payload, directory, config):
     fig.text(.09,.04,'Open packet markers: checks failed · Error definitions and coverage in diagnostics',fontsize=10,color='#555555')
     fig.savefig(directory/'elifetime_time_series.png',dpi=200);plt.close(fig)
     interactive.update_layout(template='plotly_white',title='2×2 Electron Lifetime',height=700,
-        xaxis_title='Date · '+config['timezone'],yaxis_title='Electron lifetime [µs]',
+        xaxis_title='Date · '+display_timezone,yaxis_title='Electron lifetime [µs]',
         yaxis=dict(range=[0,y_top]),
         legend=dict(orientation='h',y=1.14,x=0),margin=dict(t=140),hovermode='closest')
     # Self-contained Plotly avoids a CDN dependency on the shifter website.
     chart=interactive.to_html(full_html=False,include_plotlyjs=True,config={'responsive':True,'displaylogo':False})
     page='<html><head><meta charset="utf-8"><title>2×2 Electron Lifetime</title></head><body style="font-family:Arial;margin:20px">'+chart
-    page+='<p>PRM: daily means. Tracks and packets: 6 h pooled fits. Gases: 6 h equivalents. Open packet markers fail checks. '
+    page+='<p>Display: '+escape(display_timezone)+'. Averaging windows: '+escape(config['timezone'])+'. '
+    page+='PRM: daily means. Tracks and packets: 6 h pooled fits. Gases: 6 h equivalents. Open packet markers fail checks. '
     page+='<a href="elifetime_diagnostics.html">Fit diagnostics and coverage</a> · <a href="elifetime_time_series.png">PNG</a></p></body></html>'
     (directory/'elifetime_time_series.png.html').write_text(page)
     # Full failures and redundant external-trigger fits stay available off the

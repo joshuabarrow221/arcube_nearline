@@ -6,7 +6,7 @@
       "url_env": "PURITY_PSQL_URL",
       "table": "prm_table",
       "column": "prm_lifetime",
-      "naive_timezone": "UTC",
+      "naive_timezone": "America/Chicago",
       "quantity": "prm_lifetime",
       "unit": "s"
     },

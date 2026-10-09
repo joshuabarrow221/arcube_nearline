@@ -335,7 +335,16 @@ def query_postgres(config, start, end):
                         column = identifier(config.get('column', 'prm_lifetime'))
                         query = sa.text(f'SELECT timestamp, "{column}" FROM "{name}" '
                                         'WHERE timestamp>=:start AND timestamp<:end ORDER BY timestamp')
-                        params = dict(start=start.to_pydatetime(), end=end.to_pydatetime())
+                        # PRM's timestamp-without-time-zone column contains
+                        # acquisition-computer wall time. Convert query bounds
+                        # into that same clock before dropping the timezone;
+                        # passing aware UTC bounds into a UTC database session
+                        # would otherwise omit/misassign five or six hours.
+                        # Sources with actual timestamptz columns should omit
+                        # naive_timezone and keep the aware parameters.
+                        zone = config.get('naive_timezone')
+                        params = dict(start=(start.tz_convert(zone).tz_localize(None) if zone else start).to_pydatetime(),
+                                      end=(end.tz_convert(zone).tz_localize(None) if zone else end).to_pydatetime())
                     for stamp, value in connection.execute(query, params):
                         if value is None:
                             continue
@@ -394,7 +403,8 @@ def export_snapshot(config_path, start, end, output):
             if math.isfinite(value):
                 rows.append(dict(timestamp=aware_time(stamp).isoformat(), quantity=source['quantity'],
                                  value=value, unit=source['unit'], source=source['name'],
-                                 use_for_lifetime=source.get('use_for_lifetime', True)))
+                                 use_for_lifetime=source.get('use_for_lifetime', True),
+                                 source_naive_timezone=source.get('naive_timezone')))
         status.append(dict(source=source['name'], count=len(values)))
     payload = dict(schema_version=1, exported_at=datetime.now(timezone.utc).isoformat(),
                    start=start.isoformat(), end=end.isoformat(), sources=status, measurements=rows)

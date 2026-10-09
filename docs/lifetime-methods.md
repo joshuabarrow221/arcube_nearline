@@ -111,6 +111,11 @@ lifetimes**, without first inverting them. Daily uncertainty is
 `SEM = sample_SD / sqrt(N)` for N>1; a singleton has no estimated error. Calibration
 systematics and correlations between readings are excluded.
 
+PRM source timestamps are timezone-free Chicago wall-clock readings; localize
+them before UTC normalization and calendar-day grouping. This source convention
+is operator-specified, rather than inferred from the database session timezone.
+Ignition's epoch-based timestamps require no corresponding clock shift.
+
 Gas quality is evaluated across the retained archive before six-hour averaging.
 Defaults require ≥3 hours of coverage, no sampling gap >30 minutes, nonnegative
 concentrations and no ≥3-hour exactly flat run. Per-source tolerance and calibration

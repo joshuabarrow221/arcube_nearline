@@ -205,6 +205,39 @@ def test_ignition_function_uses_bound_tag_and_half_open_window(monkeypatch):
     assert any('READ ONLY' in q for q,_ in executed)
 
 
+@pytest.mark.parametrize('day,utc_hour', [('2026-10-09', 13), ('2026-12-09', 14)])
+def test_prm_wall_clock_query_and_normalization(monkeypatch, day, utc_hour):
+    """Chicago source time must become real UTC, including seasonal offsets."""
+    import sqlalchemy as sa
+    from purity_sources import query_postgres
+    executed=[]
+    start=aware_time(f'{day}T{utc_hour:02}:00:00Z')
+    end=start+pd.Timedelta(hours=1)
+    class Connection:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def begin(self):return self
+        def execute(self,sql,params=None):
+            executed.append((str(sql),params))
+            if str(sql).startswith('SELECT'):
+                return [(pd.Timestamp(f'{day}T08:00:00'),.001),
+                        (pd.Timestamp(f'{day}T08:53:30'),.0007),
+                        (pd.Timestamp(f'{day}T09:00:00'),.002)]
+            return []
+    class Engine:
+        def connect(self):return Connection()
+        def dispose(self):pass
+    monkeypatch.setenv('TEST_PSQL_URL','postgresql://localhost/test')
+    monkeypatch.setattr(sa,'create_engine',lambda *args,**kwargs:Engine())
+    values=query_postgres(dict(kind='postgres',url_env='TEST_PSQL_URL',
+        naive_timezone='America/Chicago'),start,end)
+    params=next(p for q,p in executed if q.startswith('SELECT'))
+    assert params['start']==pd.Timestamp(f'{day}T08:00:00').to_pydatetime()
+    assert params['end']==pd.Timestamp(f'{day}T09:00:00').to_pydatetime()
+    assert len(values)==2 and values[1][0]==start+pd.Timedelta(minutes=53,seconds=30)
+    assert values[1][0].tzinfo is not None
+
+
 def test_packet_summary_units_and_missing_uncertainty(tmp_path):
     from argparse import Namespace
     path = tmp_path/'summary.json'

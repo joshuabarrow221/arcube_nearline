@@ -12,6 +12,11 @@ shown; zooming changes the view, not the averaging windows or fitted values.
 The display follows the latest available measurements, so check their timestamps
 when assessing freshness, not just when the page was generated.
 
+The deployment example displays UTC for comparison across detector systems;
+averaging windows remain Chicago calendar days/six-hour intervals. PRM source
+wall times are localized to Chicago before UTC normalization. The operator guide
+describes correcting older snapshots that mislabeled those wall times as UTC.
+
 | Series | Input | Summary |
 |---|---|---|
 | **All tracks** | Selected through-going MIP segments in FLOW | Six-hour pooled fit |

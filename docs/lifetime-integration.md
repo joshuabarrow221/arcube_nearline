@@ -23,6 +23,7 @@ variables. Watcher and workers must resolve them identically.
 | `state_root` | Private shards, receipts, fit caches and history |
 | `publish_root` | Served plot, diagnostics and status files |
 | `display_days` | Recent interval displayed; does not change pooling |
+| `display_timezone` | Axis clock; example uses UTC, independently of Chicago averaging windows |
 | `maximum_display_us` | Display cap; omitted values remain in diagnostics |
 | `cohort_rules`, `diagnostic_patterns` | Reviewed acquisition grouping and diagnostic-only runs |
 | `gas_quality_config`, `gas_conversion_config` | Analyzer validity and conversion policy |
@@ -105,6 +106,13 @@ verified database schema and units. Its current mapping is PSQL PRM lifetimes in
 seconds; Ignition H₂O tag 1893 in ppb, O₂ tags 1890 in ppb and 1874 in ppm, and N₂
 tag 1871 in ppm. N₂ is archived but not converted to lifetime. A legacy Influx
 adapter also exists and requires an explicit measurement, field and units.
+
+The PRM `timestamp` column has no timezone. Interpret it as the acquisition
+computer's Chicago wall time (`naive_timezone: America/Chicago`), as specified
+by the operator, and normalize to UTC only after localization. Query boundaries
+use that same wall clock. Ignition epoch timestamps remain UTC instants. Earlier
+exports that labeled PRM wall time as UTC must be corrected or re-exported before
+import; do not mix those mislabeled readings with corrected snapshots.
 
 On the export host, supply protected `PURITY_PSQL_URL` and `PURITY_IGNITION_URL`
 environment variables and explicit ISO timestamps with offsets:

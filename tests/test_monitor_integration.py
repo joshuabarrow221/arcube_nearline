@@ -239,7 +239,7 @@ def test_split_selection_settings_and_timing_are_checked(tmp_path):
 
 
 def test_prm_only_end_to_end_atomic_output_and_reading_time(tmp_path,monkeypatch):
-    path,config=profile(tmp_path);snap=snapshots(config)
+    path,config=profile(tmp_path,display_timezone='UTC');snap=snapshots(config)
     payload=monitor.run_monitor(path,snap)
     assert len(payload['lifetimes'])==1
     row=payload['lifetimes'][0]
@@ -247,7 +247,11 @@ def test_prm_only_end_to_end_atomic_output_and_reading_time(tmp_path,monkeypatch
     root=Path(config['publish_root'])
     assert Image.open(root/'elifetime_time_series.png').size==(3000,2000)
     html=(root/'elifetime_time_series.png.html').read_text()
-    assert '2026-10-05T05:00:00-05:00' in html  # Actual reading-time centroid.
+    assert '2026-10-05T10:00:00+00:00' in html  # Same instant, actual centroid in UTC.
+    # Plotly JSON may ASCII-escape the middle dot in the axis title.
+    assert ('Date · UTC' in html or r'Date \u00b7 UTC' in html)
+    assert 'Averaging windows: America/Chicago' in html
+    assert row['period_start']=='2026-10-05T00:00:00-05:00'
     assert not re.search(r"<script[^>]+\bsrc\s*=", html)
     current=os.readlink(root/'.lifetime-current')
     previous=(root/'elifetime_time_series.png').read_bytes()

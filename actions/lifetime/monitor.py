@@ -188,7 +188,8 @@ def run_monitor(config_path, input_path=None):
         controls = aggregate_measurements([], config['timezone'], quality, measurements=frame, conversion_config=conversion)
         receipts = [json.loads(p.read_text()) for p in (state/'inputs').glob('*/receipt.json')]
         payload = dict(schema_version=6, generated_at=datetime.now(timezone.utc).isoformat(),
-            timezone=config['timezone'], track_window_hours=6, packet_window_hours=6, prm_window='local calendar day',
+            timezone=config['timezone'], display_timezone=config['display_timezone'],
+            track_window_hours=6, packet_window_hours=6, prm_window='local calendar day',
             lifetimes=tracks+packets+controls, raw_prm_measurements=prm_observations(frame),
             inputs=receipts, slow_control_snapshots=[str(p) for p in snapshots],
             input_errors=[dict(input_file=r['input_file'], errors=r['errors']) for r in receipts if r['errors']],

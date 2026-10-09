@@ -5,6 +5,7 @@
   "state_root": "${ARCUBE_LIFETIME_STATE_ROOT}",
   "publish_root": "${ARCUBE_LIFETIME_PREVIEW_ROOT}",
   "timezone": "America/Chicago",
+  "display_timezone": "UTC",
   "window_hours": 6,
   "packet_enabled": true,
   "packet_ext_io": 6,
