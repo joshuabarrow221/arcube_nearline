@@ -15,3 +15,6 @@ influxdb>=5.3
 fsspec>=2024.6
 aiohttp>=3.9
 requests>=2.31
+
+# Eva standalone workbook plotting (not used by database monitoring):
+openpyxl>=3.1

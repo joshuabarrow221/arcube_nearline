@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""Ahmad's provisional native-packet lifetime analysis and diagnostics.
+
+    Match packets to a selected EXT stream, pedestal-subtract and group by
+    physical channel before pooling detector-wide. EXT timing is not an IFBeam
+    match. Bootstrap errors belong to the drift-bin MPVs; this reference code
+    does not yet report an uncertainty on the final lifetime.
+"""
 import argparse, json, re
 from pathlib import Path
 from collections import Counter
@@ -31,9 +38,14 @@ TICK_US = 0.1
 ROLLOVER = 10_000_000
 
 def args():
+    """Keep standalone experimental controls explicit; the wrapper sets defaults."""
     p = argparse.ArgumentParser()
     p.add_argument("packet_file")
     p.add_argument("--detector-wide", action="store_true", help="Pool all IO groups before drift-bin MPV fitting")
+    p.add_argument('--sample-directory', help='Persist compact charge objects for fixed-window pooling')
+    p.add_argument('--sample-timestamp', help='Offset-aware acquisition start; otherwise parse native filename')
+    p.add_argument('--cohort', help='Explicit stable-configuration cohort; default is the packet directory name')
+    p.add_argument('--extract-only', action='store_true', help='Export charge objects without attempting a per-file lifetime')
     p.add_argument("--ped", default=None)
     p.add_argument("--outdir", default=None)
     p.add_argument("--chunk", type=int, default=2_000_000)
@@ -94,12 +106,12 @@ def args():
 
     p.add_argument(
         "--ped-source",
-        choices=["panel", "flow"],
+        choices=["panel", "flow", "calibration"],
         default="panel",
         help=(
             "Pedestal source. 'panel' uses the nearline panel_ped JSON; "
-            "'flow' recovers the static per-channel pedestal implicit "
-            "in FLOW Q_raw."
+            "'flow' recovers static per-channel pedestals from FLOW Q_raw; "
+            "'calibration' verifies the exact FLOW-named calibration against linked Q_raw pairs."
         ),
     )
 
@@ -114,6 +126,7 @@ def args():
     return p.parse_args()
 
 def find_ped(packet):
+    """Find legacy panel JSON by filename; FLOW recovery does not require it."""
     m = re.search(r"packet-(\d+)", packet.name)
     cands = [packet.with_name(packet.name+".panel_ped.json"),
              packet.with_name(packet.stem+".panel_ped.json")]
@@ -128,6 +141,7 @@ def find_ped(packet):
     return None
 
 def fill_last(x):
+    """Forward-fill nonzero clock increments; leading values stay zero."""
     idx = np.where(x != 0, np.arange(len(x)), -1)
     np.maximum.accumulate(idx, out=idx)
     out = np.zeros_like(x)
@@ -136,6 +150,7 @@ def fill_last(x):
     return out
 
 def unroll_mclk(p):
+    """Apply the reference per-IO rollover correction in native 0.1-µs ticks."""
     raw = p["timestamp"].astype(np.int64) % (2**31)
     out = np.zeros(len(p), dtype=np.int64)
     for io in np.unique(p["io_group"]):
@@ -151,6 +166,7 @@ def unroll_mclk(p):
     return out
 
 def window_count(data, trig, lo_us, hi_us):
+    """Count sorted charge times near triggers for the stream-choice heuristic."""
     lo, hi = int(lo_us/TICK_US), int(hi_us/TICK_US)
     n = 0
     for t0 in trig:
@@ -158,6 +174,7 @@ def window_count(data, trig, lo_us, hi_us):
     return n
 
 def choose_ext(tim, mclk, data_sorted, trigger_type):
+    """Rank EXT streams by post-minus-pre activity, not by verified beam origin."""
     rows = []
     ios = np.unique(tim["io_group"][(tim["packet_type"]==7)&(tim["trigger_type"]==trigger_type)])
     for io in ios:
@@ -175,6 +192,7 @@ def choose_ext(tim, mclk, data_sorted, trigger_type):
     return int(d.iloc[0].io_group), d
 
 def dt_hist(data, trig, lo_us=-100, hi_us=300, bin_us=2):
+    """Build a diagnostic time-relative-to-EXT histogram with explicit units."""
     lo, hi, bw = int(lo_us/TICK_US), int(hi_us/TICK_US), int(bin_us/TICK_US)
     edges = np.arange(lo, hi+bw, bw)
     c = np.zeros(len(edges)-1, dtype=np.int64)
@@ -185,6 +203,11 @@ def dt_hist(data, trig, lo_us=-100, hi_us=300, bin_us=2):
     return 0.5*(edges[:-1]+edges[1:])*TICK_US, c
 
 def fit_langau(q, bin_width=1.0, qmin=0.0, qmax=50.0):
+    """Fit the smoothed-peak-selected window of the raw charge histogram.
+
+    Smoothing selects the fit window only; the fit uses the original bin
+    counts. The returned MPV is the maximum of the fitted convolved curve.
+    """
     q = np.asarray(q, float)
     q = q[np.isfinite(q)&(q>=qmin)&(q<qmax)]
     edges = np.arange(qmin, qmax+bin_width, bin_width)
@@ -212,6 +235,7 @@ def fit_langau(q, bin_width=1.0, qmin=0.0, qmax=50.0):
                 pars=pars, cov=cov, x=ctr, hist=hist, mask=mask, xx=xx, yy=yy)
 
 def bootstrap_mpv(q, nboot, seed):
+    """Resample charge objects; require ten successful replicas for MPV spread."""
     central = fit_langau(q)["mpv"]
     if nboot <= 0: return central, np.nan, 0
     q=np.asarray(q,float); rng=np.random.default_rng(seed); vals=[]
@@ -224,6 +248,12 @@ def bootstrap_mpv(q, nboot, seed):
     return central, (np.std(vals,ddof=1) if len(vals)>=10 else np.nan), len(vals)
 
 def common_fit(d, tmin, tmax):
+    """Fit a shared inverse lifetime (ms^-1) using bootstrap MPV errors.
+
+    Detector-wide mode has one pooled amplitude. Multi-IO reference mode has
+    separate amplitudes. Boundary/underconstrained solutions are unavailable,
+    not measurements with a fabricated zero or small uncertainty.
+    """
     d=d[(d.time_us>=tmin)&(d.time_us<=tmax)&np.isfinite(d.mpv)&np.isfinite(d.mpv_err)&(d.mpv_err>0)].copy()
     ios=sorted(d.io_group.unique()); lookup={io:i for i,io in enumerate(ios)}
     t=d.time_us.to_numpy()/1000.; q=d.mpv.to_numpy(); e=d.mpv_err.to_numpy()
@@ -307,6 +337,7 @@ def common_fit_unweighted(d, tmin, tmax):
 
 
 def main():
+    """Run the standalone reference analysis and retain intermediate diagnostics."""
     a=args()
     packet=Path(a.packet_file).expanduser().resolve()
     if not packet.exists(): raise SystemExit(f"Missing {packet}")
@@ -340,7 +371,8 @@ def main():
         plt.yscale("log"); plt.xlabel("Raw ADC"); plt.ylabel("Packets"); plt.tight_layout()
         plt.savefig(out/"raw_adc.png",dpi=150); plt.close()
 
-        # timing
+        # Timing fields for all packets are held in memory to preserve order
+        # across rollovers. --chunk bounds other reads, not total process RAM.
         fields=["packet_type","io_group","trigger_type","timestamp","receipt_timestamp"]
         print("loading timing fields...")
         tim=packets.fields(fields)[:]
@@ -393,7 +425,22 @@ def main():
     # Pedestal source
     # ========================================================
 
-    if a.ped_source == "panel":
+    calibration_provenance = None
+    flow_calibration_identity = None
+    if a.ped_source == 'calibration':
+        if not a.flow_file or not ped:
+            raise ValueError('calibration pedestals require --flow-file and --ped naming the exact static calibration')
+        from calibration_pedestal import calibration_map
+        from packet_pedestal import key as flow_key
+        # Geometry/source verification reads only small ranges from remote
+        # FLOW; native packet grouping still uses the complete packet file.
+        channel_columns = ['io_group','io_channel','chip_id','channel_id']
+        channels = df[channel_columns].drop_duplicates().to_records(index=False)
+        lookup, calibration_provenance = calibration_map(a.flow_file,ped,channels)
+        address = flow_key(*(df[c].to_numpy(dtype=np.int64) for c in channel_columns))
+        df['pedestal'] = [lookup.get(int(k),np.nan) for k in address]
+        print('Static calibration verified:',calibration_provenance,flush=True)
+    elif a.ped_source == "panel":
 
         print("pedestal source: panel_ped JSON")
         print("pedestal file:", ped)
@@ -440,13 +487,24 @@ def main():
         print("pedestal source: FLOW static Q_raw pedestal")
         print("FLOW file:", flow)
 
-        # Reuse the already-tested pedestal reconstruction from
-        # packet_lifetime_final.py.
-        #
-        # This does NOT use FLOW event building, corrected charge,
-        # reconstructed t0, or Y-Z information.
+        # Recover the intercept through explicit hit-to-packet references;
+        # do not assume hit and packet row numbers are aligned. Q_raw is used
+        # only for static electronics calibration, never for drift attenuation.
         from packet_pedestal import flow_ped_map, key as flow_key
         lookup = flow_ped_map(flow)
+
+        # A run directory can contain several calibration epochs. Preserve
+        # FLOW's calibration identity in the pooling fingerprint, so a retry
+        # or calibration change cannot silently combine incompatible objects.
+        # Missing provenance is deliberately file-specific, not a shared
+        # "unknown" epoch that would pool every unverified input together.
+        with h5py.File(flow, 'r') as source:
+            attrs = source['charge/calib_prompt_hits'].attrs
+            flow_calibration_identity = {
+                name: str(attrs.get(name, '')) for name in
+                ('pedestal_file', 'configuration_file', 'gain_file', 'classname', 'class_version')}
+        if not flow_calibration_identity['pedestal_file']:
+            flow_calibration_identity['unverified_file'] = packet.name
 
         print("FLOW pedestal channels:", len(lookup))
 
@@ -480,10 +538,10 @@ def main():
     # --------------------------------------------------------
     # Brooke-like packet charge construction
     #
-    # Keep the v2 charge convention for the moment:
-    #     q_trigger = |ADC - pedestal|
+    # --charge-mode chooses signed ADC - pedestal or the legacy absolute value.
+    # The central purity wrapper explicitly chooses the signed convention.
     #
-    # The absolute-value convention is still provisional; the
+    # Both conventions require physics validation; the
     # successive-trigger construction below is the part clarified
     # directly by Brooke.
     # --------------------------------------------------------
@@ -634,6 +692,37 @@ def main():
         errors="ignore",
     )
     sc.to_pickle(out/"slice_charge.pkl"); fit.to_pickle(out/"fit_sample.pkl")
+    # Export before fitting: a short file with no accepted lifetime can still
+    # contribute independent charge objects to a later fixed-window fit.
+    if a.sample_directory:
+        import hashlib
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        from nearline_util import date_from_filename
+        from purity_sources import aware_time, atomic_json
+        from packet_pooling import store_sample
+        configuration = dict(charge_mode=a.charge_mode, successive_min_ticks=a.successive_min_ticks,
+            successive_max_ticks=a.successive_max_ticks, successive_gap_us=a.successive_gap_us,
+            keep_single=a.keep_single, time_bin_us=a.time_bin_us, drift_max_us=a.drift_max_us,
+            fit_tmin_us=a.fit_tmin_us, fit_tmax_us=a.fit_tmax_us,
+            minimum_bin_objects=a.min_io_bin_entries, maximum_slice_chi2_ndf=a.max_langau_chi2,
+            ext_io_group=int(ext_io), ext_trigger_type=a.ext_trigger_type, pedestal_source=a.ped_source,
+            pedestal_identity=(calibration_provenance['sha256'] if calibration_provenance else
+                               hashlib.sha256(ped.read_bytes()).hexdigest() if ped else flow_calibration_identity),
+            extraction_code_sha256=hashlib.sha256(b''.join(Path(__file__).with_name(name).read_bytes()
+                for name in ('packet_lifetime.py','packet_pedestal.py','calibration_pedestal.py'))).hexdigest())
+        metadata = store_sample(fit, dict(packet_file=str(packet), flow_file=a.flow_file,
+            timestamp=aware_time(a.sample_timestamp or date_from_filename(str(packet))).isoformat(),
+            cohort=a.cohort or packet.parent.name, configuration=configuration,
+            calibration_provenance=calibration_provenance,
+            pedestal_coverage=coverage, n_ext=len(ext_t),
+            duration_s=float((data_mclk.max()-data_mclk.min())*TICK_US/1e6)), a.sample_directory)
+        if a.extract_only:
+            atomic_json(out/'summary.json', dict(extraction_only=True, sample=metadata,
+                        aggregation='detector-wide pooled charge', packet_file=str(packet)))
+            print('Charge objects saved for fixed-window pooling:', len(fit))
+            return
+    elif a.extract_only:
+        raise ValueError('--extract-only requires --sample-directory')
     if fit.empty:
         raise RuntimeError("No charge objects survive packet selection")
 

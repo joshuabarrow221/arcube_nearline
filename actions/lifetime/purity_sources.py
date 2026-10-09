@@ -10,12 +10,14 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from lifetime_io import public_permissions
 
 import numpy as np
 import pandas as pd
 
 
 def atomic_json(path, payload):
+    """Publish strict JSON by same-directory rename; never serialize NaN/Inf."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=path.parent)
@@ -24,7 +26,7 @@ def atomic_json(path, payload):
             json.dump(payload, stream, indent=2, allow_nan=False)
             stream.write('\n')
         # Snapshots/history contain measurements only and are published by nearline.
-        os.chmod(name, 0o644)
+        public_permissions(name)
         os.replace(name, path)
     finally:
         if os.path.exists(name):
@@ -32,6 +34,7 @@ def atomic_json(path, payload):
 
 
 def aware_time(value, naive_timezone=None):
+    """Normalize to UTC without guessing a zone for naive database timestamps."""
     stamp = pd.Timestamp(value)
     if pd.isna(stamp):
         raise ValueError('missing timestamp')
@@ -72,8 +75,56 @@ def load_measurements(paths):
     return pd.DataFrame(rows.values(), columns=['timestamp', 'quantity', 'source', 'value'])
 
 
-def aggregate_measurements(paths, timezone_name='America/Chicago', quality_config=None):
-    frame = load_measurements(paths)
+def prm_observations(frame):
+    """Retain individual normalized PRM readings for the companion plot.
+
+    These are recorded lifetime estimates, not waveform samples. Their own
+    fit errors are unavailable in the snapshot, so a daily SEM must never be
+    attached to an individual reading. ``load_measurements`` has already
+    applied validity flags, unit conversion and exact-observation deduplication.
+    """
+    return [dict(timestamp=row.timestamp.isoformat(), source=row.source,
+                 sample='prm', method='prm', lifetime_us=float(row.value),
+                 error_us=None, fit_status='ok',
+                 uncertainty='individual recorded PRM lifetime; measurement uncertainty unavailable')
+            for row in frame[frame.quantity == 'prm_lifetime'].itertuples()]
+
+
+def gas_conversion_rates(config=None):
+    """Return inverse-us/ppb coefficients, with explicit reference-field provenance.
+
+    Importing Eva's functions does not read her workbook or call her main().
+    Analyzer offsets are not transferable without a verified channel/epoch map.
+    """
+    if config is None:
+        return 1/299., 1/17000., None
+    if set(config) != {'model', 'field_strength_vpercm'}:
+        raise ValueError('gas conversion config requires exactly model and field_strength_vpercm')
+    if config['model'] != 'eva_20261006':
+        raise ValueError('unsupported gas conversion model')
+    field = float(config['field_strength_vpercm'])
+    if not math.isfinite(field) or field <= 0:
+        raise ValueError('gas reference field must be positive and finite')
+    from plot_lifetime_history import k_A_O2_per_s, K_A_H2O_PER_S
+    oxygen, water = float(k_A_O2_per_s(field))*1e-15, float(K_A_H2O_PER_S)*1e-15
+    if not all(math.isfinite(k) and k > 0 for k in (oxygen, water)):
+        raise ValueError('invalid attachment coefficients at requested field')
+    return oxygen, water, dict(model=config['model'], field_strength_vpercm=field,
+        oxygen_rate_per_us_ppb=oxygen, water_rate_per_us_ppb=water,
+        source_commit='6459a1a0c615e580dbbded76566e3c7bb9587b3c',
+        concentration_policy='raw database concentrations; no unverified zero-offset or phase correction',
+        field_scope='reference field; not an assertion of uniform TPC or gas/liquid conditions')
+
+
+def aggregate_measurements(paths, timezone_name='America/Chicago', quality_config=None, measurements=None, conversion_config=None):
+    """Summarize accepted readings; optionally reuse an already normalized frame.
+
+    Reusing the frame lets the CLI retain raw PRM readings without reading a
+    month of analyzer snapshots twice. Copy before adding local-time columns
+    so the caller's raw observations keep their original UTC timestamps.
+    """
+    k_oxygen, k_water, conversion = gas_conversion_rates(conversion_config)
+    frame = load_measurements(paths) if measurements is None else measurements.copy()
     results = []
     if frame.empty:
         return results
@@ -83,6 +134,9 @@ def aggregate_measurements(paths, timezone_name='America/Chicago', quality_confi
             if values.empty:
                 continue
             end = start + pd.DateOffset(days=1)
+            # The midpoint labels the averaging window, not the acquisition
+            # time. Preserve the actual observation bounds separately.
+            # SEM assumes independent readings and excludes calibration errors.
             results.append(dict(timestamp=(start + (end-start)/2).isoformat(),
                 period_start=start.isoformat(), period_end=end.isoformat(),
                 sample='prm', method='prm', source=source, fit_status='ok',
@@ -148,15 +202,19 @@ def aggregate_measurements(paths, timezone_name='America/Chicago', quality_confi
                     base['concentration_ppb'][species] = item['mean']
                     base['n_measurements'][species] = item['count']
                     base['analyzer_quality'][species] = item
+            if conversion is not None:
+                base['gas_conversion'] = conversion
             o2_only = dict(base, sample='gas_o2', method='gas_o2',
-                conversion='Eva O2 term only: tau_us = 299 / mean_O2_ppb')
+                conversion=('Eva O2 term only: tau_us = 299 / mean_O2_ppb' if conversion is None else
+                    'Eva 2026-10-06: tau_us = 1 / (k_O2(E) * mean_O2_ppb)'))
             if oxygen and not oxygen['reasons'] and oxygen['mean'] > 0:
-                o2_only.update(lifetime_us=299/oxygen['mean'], fit_status='ok')
+                o2_only.update(lifetime_us=(299/oxygen['mean'] if conversion is None else 1/(k_oxygen*oxygen['mean'])), fit_status='ok')
             else:
                 o2_only['fit_message'] = '; '.join(oxygen['reasons']) if oxygen and oxygen['reasons'] else 'O2 unavailable or nonpositive'
             results.append(o2_only)
             combined = dict(base, sample='gas', method='gas',
-                conversion='Eva: tau_us = 1000 / (mean_O2_ppb/0.299 + mean_H2O_ppb/17)',
+                conversion=('Eva: tau_us = 1000 / (mean_O2_ppb/0.299 + mean_H2O_ppb/17)' if conversion is None else
+                    'Eva 2026-10-06: tau_us = 1 / (k_O2(E) * mean_O2_ppb + k_H2O * mean_H2O_ppb)'),
                 water_source=water_sources[0] if water_sources else None)
             reasons = []
             for species, item in [('O2', oxygen), ('H2O', water)]:
@@ -166,7 +224,12 @@ def aggregate_measurements(paths, timezone_name='America/Chicago', quality_confi
                     reasons.extend(species+': '+reason for reason in item['reasons'])
             if not reasons:
                 combined['last_observed_at'] = min(oxygen['last_observed_at'], water['last_observed_at'], key=aware_time)
-                rate = oxygen['mean']/.299 + water['mean']/17
+                # Eva's inverse conversion is nonlinear: convert the mean
+                # concentrations, never average instantaneous lifetimes.
+                # The coefficients are provisional, not a validated liquid-
+                # phase calibration or an uncertainty model.
+                rate = (oxygen['mean']/.299 + water['mean']/17 if conversion is None else
+                        1000*(k_oxygen*oxygen['mean'] + k_water*water['mean']))
                 if rate > 0:
                     combined.update(lifetime_us=1000/rate, fit_status='ok')
                 else:
@@ -206,12 +269,19 @@ def plateau_flags(readings, config):
 
 
 def identifier(value):
+    """Whitelist SQL identifiers; values themselves use bound parameters."""
     if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', value):
         raise ValueError(f'invalid database identifier {value!r}')
     return value
 
 
 def query_postgres(config, start, end):
+    """Read one source in bounded sequential queries, keeping credentials local.
+
+    The Ignition function's timestamp arguments are interpreted in the UTC
+    session. Filter the returned range again because its endpoint behavior can
+    otherwise duplicate adjacent exports. A timeout aborts the whole snapshot.
+    """
     import sqlalchemy as sa
     if 'credential_ini' in config:
         import configparser
@@ -283,6 +353,7 @@ def query_postgres(config, start, end):
 
 
 def query_influx(config, start, end):
+    """Read an explicitly configured legacy measurement; never guess its units."""
     from influxdb import InfluxDBClient
     kwargs = dict(config.get('connection', {}))
     for key, env in config.get('connection_env', {}).items():
@@ -302,6 +373,11 @@ def query_influx(config, start, end):
 
 
 def export_snapshot(config_path, start, end, output):
+    """Write raw observations only after every enabled source query succeeds.
+
+    An empty successful query has count zero. A failed query raises and leaves
+    the prior snapshot intact; absence of records is not an instrument zero.
+    """
     start, end = aware_time(start), aware_time(end)
     if end <= start:
         raise ValueError('end must be after start')

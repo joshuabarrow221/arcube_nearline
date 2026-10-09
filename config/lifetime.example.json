@@ -1,0 +1,20 @@
+{
+  "flow_root": "${ARCUBE_LIFETIME_FLOW_ROOT}",
+  "packet_root": "${ARCUBE_LIFETIME_PACKET_ROOT}",
+  "snapshot_root": "${ARCUBE_LIFETIME_SNAPSHOT_ROOT}",
+  "state_root": "${ARCUBE_LIFETIME_STATE_ROOT}",
+  "publish_root": "${ARCUBE_LIFETIME_PREVIEW_ROOT}",
+  "timezone": "America/Chicago",
+  "window_hours": 6,
+  "packet_enabled": true,
+  "packet_ext_io": 6,
+  "bootstrap": 100,
+  "snapshot_pattern": "slowcontrols-*.json",
+  "gas_conversion_config": "../actions/lifetime/gas_conversion.eva20261006.json",
+  "gas_samples": ["gas"],
+  "display_days": 35,
+  "maximum_display_us": 10000,
+  "diagnostic_patterns": ["*HotPixelsHunt*", "*BadNoise*", "*induced_noise*"],
+  "cohort_rules": [],
+  "reprocess_token": "initial-six-hour-profile"
+}

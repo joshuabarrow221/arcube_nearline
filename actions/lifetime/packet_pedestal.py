@@ -10,10 +10,12 @@ import numpy as np
 
 
 def key(io, channel, chip, pixel):
+    """Pack the complete physical channel address; never merge across IOs."""
     return (((np.asarray(io, dtype=np.int64)*256 + channel)*256 + chip)*64 + pixel)
 
 
 def take(dataset, indices):
+    """Read arbitrary HDF5 row references, preserving order and repetitions."""
     indices = np.asarray(indices, dtype=np.int64)
     unique, inverse = np.unique(indices, return_inverse=True)
     # Read a contiguous span when references are local; h5py point selection
@@ -26,6 +28,13 @@ def take(dataset, indices):
 
 
 def flow_ped_map(path, chunk=200_000):
+    """Infer static ADC intercepts with chunked per-channel sufficient statistics.
+
+    Only linked Q_raw/ADC pairs from the same channel qualify. The tight linear
+    residual check tests the calibration identity, not detector noise: both
+    numbers were generated from the same packet. This is not a pedestal fit
+    to the observed physics charge distribution.
+    """
     totals = {}
     hit_path = 'charge/calib_prompt_hits'
     with h5py.File(path, 'r') as flow:
@@ -51,6 +60,8 @@ def flow_ped_map(path, chunk=200_000):
                     totals[int(channel)] = values
     result = {}
     for channel, (n, sx, sy, sxx, sxy, syy) in totals.items():
+        # Analytic OLS needs ADC variation. Constant-ADC channels cannot
+        # independently determine slope and pedestal and must be omitted.
         variance = sxx-sx*sx/n
         if n < 3 or variance <= 1e-8:
             continue

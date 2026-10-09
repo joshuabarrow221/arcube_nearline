@@ -398,3 +398,116 @@ def test_annotations_survive_refresh_and_appear_in_interactive_plot(tmp_path):
     html=Path(str(output)+'.html').read_text()
     assert 'DF-560 range' in html
     assert Image.open(output).size==(3000,2000)
+
+
+def test_raw_prm_uses_observation_times_and_survives_refresh(tmp_path):
+    """A retry must not double-count readings or turn daily means into raw data."""
+    from purity_sources import prm_observations
+    source = snapshot(tmp_path, [row('prm_lifetime', .001, '2026-09-29T01:00:00-05:00'),
+                                 row('prm_lifetime', .003, '2026-09-29T02:00:00-05:00')])
+    frame = load_measurements([source, source])
+    raw = prm_observations(frame)
+    means = aggregate_with_quality([], measurements=frame)
+    path = tmp_path/'history.json'
+    lifetime.update_json(path, means, raw_prm_measurements=raw)
+    lifetime.update_json(path, means, raw_prm_measurements=raw)
+    saved = lifetime.update_json(path, [])
+    assert len(saved['raw_prm_measurements']) == 2
+    series = lifetime.overlay_groups(saved['lifetimes'], True, saved['raw_prm_measurements'])
+    group = series[('prm', 'prm_lifetime')]
+    assert [r['lifetime_us'] for r in group['points']] == [1000, 3000]
+    assert all(r['error_us'] is None for r in group['points'])
+    assert [r['lifetime_us'] for r in group['means']] == [2000]
+    assert aware_time(group['means'][0]['timestamp']) == aware_time('2026-09-29T01:30:00-05:00')
+    assert aware_time(group['means'][0]['first_observed_at']) == aware_time('2026-09-29T01:00:00-05:00')
+    assert aware_time(group['means'][0]['last_observed_at']) == aware_time('2026-09-29T02:00:00-05:00')
+    assert all(r['timestamp'] != group['means'][0]['timestamp'] for r in group['points'])
+    old = lifetime.overlay_groups(means, True, [])
+    assert old[('prm', 'prm_lifetime')]['points'] == []
+
+
+def test_review_is_persistent_reversible_and_does_not_erase_low_fits(tmp_path):
+    """Review by full source identity, never by the measured lifetime value."""
+    def fit(name, value):
+        return dict(timestamp='2026-10-05T17:00:00-05:00', input_file=name,
+                    calculation_source='flow_segments', method='track', sample='all_mip',
+                    lifetime_us=value, error_us=20, fit_status='ok')
+    rows = [fit('noise/file.FLOW.hdf5', 700), fit('cosmic/file.FLOW.hdf5', 900)]
+    policy = {'rules': [dict(input_file=rows[0]['input_file'], action='exclude', reason='Intentional noise study')]}
+    path = tmp_path/'history.json'
+    lifetime.update_json(path, rows, track_review=policy)
+    data = lifetime.update_json(path, rows)  # A refit must retain the review.
+    assert data['plot_lifetimes'][0]['lifetime_us'] == 900
+    assert data['plot_lifetimes'][0]['n_excluded'] == 1
+    assert [r['lifetime_us'] for r in data['lifetimes']] == [700, 900]
+    assert all(r['fit_status'] == 'ok' for r in data['lifetimes'])
+    series = lifetime.overlay_groups(data['lifetimes'], True)
+    assert len(series[('all_mip', '')]['points']) == 2
+    assert lifetime.connected_values(series[('all_mip', '')]['means'])[1] == [900]
+    restored = lifetime.update_json(path, [], track_review={'rules': []})
+    assert restored['plot_lifetimes'][0]['lifetime_us'] == 800
+    assert not any(r.get('monitoring_excluded') for r in restored['lifetimes'])
+    assert not any('monitoring_excluded' in r for r in rows)  # No caller mutation.
+
+
+def test_raw_plot_only_connects_means_and_publishes_exclusions(tmp_path, monkeypatch):
+    """Inspect actual Plotly traces, not just an HTML file's existence."""
+    import plotly.graph_objects as go
+    captured = []
+    original = go.Figure.write_html
+    def capture(self, *args, **kwargs):
+        captured.append(self.to_plotly_json())
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(go.Figure, 'write_html', capture)
+    rows = [dict(timestamp=f'2026-10-05T{hour}:00:00-05:00', input_file=f'file{i}.h5',
+                 sample='all_mip', method='track', calculation_source='flow_segments',
+                 lifetime_us=value, error_us=30, fit_status='ok')
+            for i, (hour, value) in enumerate([('12', 1000), ('13', 1400), ('14', 600)])]
+    policy = {'rules': [dict(input_file='file2.h5', action='exclude', reason='Noise study') ]}
+    output = tmp_path/'overlay.png'
+    lifetime.update_json(tmp_path/'history.json', rows, output, track_review=policy)
+    for p in (output, lifetime.raw_plot_path(output)):
+        assert Image.open(p).size == (3000, 2000)
+        assert Path(str(p)+'.html').exists()
+    traces = captured[1]['data']
+    assert [t['y'] for t in traces if t['mode'] == 'lines'] == [[1200]]
+    points = [t for t in traces if t['mode'] == 'markers']
+    assert points[0]['y'] == [1000, 1400]
+    excluded = next(t for t in points if 'excluded from mean' in t['name'])
+    assert excluded['y'] == [600] and 'Noise study' in excluded['text'][0]
+    mean = next(t for t in points if t['name'].endswith('(mean)'))
+    assert mean['y'] == [1200]
+    assert aware_time(mean['x'][0]) == aware_time('2026-10-05T12:30:00-05:00')
+    assert 'Raw PRM readings unavailable' in Path(str(lifetime.raw_plot_path(output))+'.html').read_text()
+
+
+def test_raw_prm_conflicts_and_ambiguous_reviews_fail_before_publication(tmp_path):
+    path = tmp_path/'history.json'
+    raw = dict(timestamp='2026-10-01T00:00:00Z', source='PRM', lifetime_us=1000)
+    lifetime.update_json(path, [], raw_prm_measurements=[raw])
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match='conflicting raw PRM'):
+        lifetime.update_json(path, [], raw_prm_measurements=[dict(raw, lifetime_us=900)])
+    assert path.read_bytes() == before
+    entry = dict(input_file='a.h5', calculation_source='flow_segments', method='track')
+    rule = dict(input_file='a.h5', action='exclude', reason='study')
+    with pytest.raises(ValueError, match='overlapping'):
+        lifetime.apply_track_review([entry], {'rules': [rule, rule]})
+    with pytest.raises(ValueError, match='reason'):
+        lifetime.apply_track_review([entry], {'rules': [dict(rule, reason='')]})
+
+
+def test_track_audit_shows_singletons_and_leave_one_out_influence():
+    from track_audit import audit_tracks
+    def entry(name, value, stamp):
+        return dict(input_file=name, lifetime_us=value, error_us=20, timestamp=stamp,
+                    sample='all_mip', method='track', calculation_source='flow_segments')
+    rows = [entry('singleton', 860, '2026-10-03T13:00:00-05:00'),
+            entry('a', 740, '2026-10-05T17:00:00-05:00'),
+            dict(entry('b', 920, '2026-10-05T17:01:00-05:00'), monitoring_excluded=True)]
+    singleton, pair = audit_tracks(rows)['windows']
+    assert singleton['contributions'][0]['leave_one_out_mean_us'] is None
+    assert pair['unreviewed_mean_us'] == 830
+    assert pair['monitoring_mean_us'] == 740
+    assert [r['leave_one_out_mean_us'] for r in pair['contributions']] == [920, 740]
+    assert [r['mean_change_when_omitted_us'] for r in pair['contributions']] == [90, -90]

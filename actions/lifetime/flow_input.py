@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from lifetime_io import public_permissions
 import tempfile
 from urllib.parse import urlparse
 
@@ -21,6 +22,7 @@ DEFAULT_SEGMENTS = ('analysis/beam_rock_muon_segments/data',
 
 
 def is_remote(path):
+    """Only HTTP(S) paths opt into network reads; everything else is local."""
     return str(path).startswith(('https://', 'http://'))
 
 
@@ -38,6 +40,8 @@ def open_flow(path):
     response.raise_for_status()
     size = int(response.headers['Content-Length'])
     etag = response.headers.get('ETag', '')
+    # Multiple range requests must see one file generation. A strong ETag
+    # plus If-Match makes a mid-read replacement fail instead of mixing bytes.
     if not etag or etag.startswith('W/'):
         raise ValueError('remote FLOW needs a strong ETag for consistent range reads')
     provenance = dict(input_file=path, source_size_bytes=size, source_etag=etag,
@@ -53,6 +57,12 @@ def open_flow(path):
 
 
 def cache_flow_segments(url, directory, requested_paths=None):
+    """Optionally persist only requested arrays, keyed by URL and dataset set.
+
+    Revalidate the remote generation before using an existing cache. Build a
+    temporary HDF5 and rename only after all arrays/metadata are complete, so a
+    interrupted download cannot be mistaken for a finished segment cache.
+    """
     import aiohttp
     import fsspec
     import requests
@@ -95,7 +105,7 @@ def cache_flow_segments(url, directory, requested_paths=None):
                 cache.attrs.update(source_flow_url=url, source_etag=etag, source_size_bytes=size,
                     requested_range_bytes=stream.cache.total_requested_bytes, source_datasets=json.dumps(manifest),
                     complete=True, contents='Exact segment arrays from FLOW; no lifetime estimates copied')
-        os.chmod(name, 0o644)
+        public_permissions(name)
         os.replace(name, target)
     finally:
         if os.path.exists(name):

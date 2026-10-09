@@ -12,6 +12,19 @@ from packet_pedestal import take
 
 
 def select_muons(input_file, output_file, max_events=None):
+    """Reuse the installed selector, writing a separate segment-only sidecar.
+
+    ``max_events`` is a development limit; the production CLI leaves it unset.
+    Record the selector hash and completeness because changing reconstruction
+    or processing only a prefix can change the inferred lifetime.
+
+    Both timing categories run the same clustering, cleaning and through-going
+    track selection below. "Cosmic-enriched" adds only n_ext_trigs == 0 at the
+    event level; it is not a dedicated cosmic-muon identification algorithm.
+    lifetime.fit_samples forms All tracks by concatenating the two categories'
+    segments before fitting. Cosmic-enriched tracks are included in that fit,
+    so their separate curve is a correlated subset comparison.
+    """
     from proto_nd_flow.selection.RockMuon_selection import RockMuonSelection
     selector = RockMuonSelection(name='lifetime_selection', classname='RockMuonSelection', data_manager=None)
     selected = {'beam': [], 'cosmic': []}
@@ -26,6 +39,8 @@ def select_muons(input_file, output_file, max_events=None):
         for index in range(n_events):
             event = events[index]
             region = regions[index]
+            # Explicit H5Flow references are the association authority. Hit
+            # rows are not assumed contiguous or aligned with event row IDs.
             links = refs[int(region['start']):int(region['stop'])]
             indices = links[links[:, 0] == index, 1]
             event_hits = take(hits, np.unique(indices))
@@ -33,6 +48,10 @@ def select_muons(input_file, output_file, max_events=None):
             event_hits = event_hits[valid]
             if len(event_hits) < 3:
                 continue
+            # Compatibility keys describe trigger timing only. Neither this
+            # branch nor the selector queries IFBeam or proves particle origin.
+            # Zero external triggers is not a verified beam-off interval; a
+            # positive count can also accompany cosmics during commissioning.
             sample = 'beam' if event['n_ext_trigs'] > 0 else 'cosmic'
             for indices in selector.cluster(event_hits):
                 if len(indices) <= 10:
@@ -51,6 +70,8 @@ def select_muons(input_file, output_file, max_events=None):
         complete = n_events == len(events)
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(output_file, 'w') as out:
+        # These sidecars belong outside the watched FLOW tree; otherwise a
+        # recursive watcher could enqueue them as new detector input files.
         out.attrs['source_file'] = str(Path(input_file).resolve())
         out.attrs['complete'] = complete
         out.attrs['events_processed'] = n_events
