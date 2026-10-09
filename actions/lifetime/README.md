@@ -16,6 +16,9 @@ The deployment example displays UTC for comparison across detector systems;
 averaging windows remain Chicago calendar days/six-hour intervals. PRM source
 wall times are localized to Chicago before UTC normalization. The operator guide
 describes correcting older snapshots that mislabeled those wall times as UTC.
+The detailed study PNGs and interactive companions also display UTC. Gas
+equivalents are placed at the **center of their six-hour window**, in every view;
+for example, 11:00–17:00 UTC is plotted at 14:00 UTC.
 
 | Series | Input | Summary |
 |---|---|---|

@@ -520,6 +520,10 @@ def update_json(output_file_json, results, output_timeseries=None, timezone_name
             data['annotations'] = annotations if isinstance(annotations, list) else json.loads(Path(annotations).read_text())
         if gas_conversion_config is not None:
             data['gas_conversion_config'] = gas_conversion_config
+        # Study plots use UTC on both exported surfaces. Keep the grouping
+        # clock explicit: switching an axis must never reassign observations.
+        data['timezone'] = timezone_name
+        data['display_timezone'] = 'UTC'
         atomic_json(path, data)
         if output_timeseries:
             draw_overlay(publication, output_timeseries, timezone_name, data.get('annotations'))
@@ -597,7 +601,9 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
     Raw points are never joined. Connecting only the mean rows makes file-
     level scatter and isolated PRM spikes visible without implying that the
     line traces their acquisition sequence. Gas series keep their six-hour
-    conversion grain in both views.
+    conversion grain in both views and stay at the averaging-window midpoint.
+    ``timezone_name`` controls grouping only. Both PNG and HTML display true
+    UTC instants, including raw readings, mean positions and annotations.
     """
     from collections import defaultdict
     from datetime import datetime, timezone, timedelta
@@ -613,7 +619,9 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
     excluded = sum(bool(r.get('monitoring_excluded')) for r in entries if is_flow_track(r))
     fig, ax = plt.subplots(figsize=(15, 10), dpi=200)
     interactive = go.Figure()
-    tz = ZoneInfo(timezone_name)
+    # Match the UTC instants already emitted to Plotly; previously only the
+    # PNG ticks/footer were converted back to the grouping timezone.
+    tz = ZoneInfo('UTC')
     packet_legend_shown = False
     for (sample, source), group in sorted(series.items()):
         all_rows = group['means']
@@ -766,7 +774,7 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
             hovertemplate='%{x}<br>Candidate %{y:.3f} µs<br>%{text}<extra>%{fullData.name}</extra>'))
     title = 'DUNE ND Prototype 2×2 · liquid argon purity' + (' · individual observations' if raw_points else '')
     fig.suptitle(title, fontsize=15)
-    ax.set(xlabel=f'Date ({timezone_name})', ylabel='Electron lifetime [µs]')
+    ax.set(xlabel='Date (UTC)', ylabel='Electron lifetime [µs]')
     ax.set_ylim(bottom=0)
     ax.grid(alpha=0.18)
     # Include individual timestamps when setting the axis: otherwise an
@@ -816,7 +824,7 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
                     text=event['label'], showarrow=False, textangle=-90, yanchor='top')
     accepted_groups = {key: [r for r in rows if valid_lifetime(r) and not r.get('monitoring_excluded')] for key, rows in groups.items()}
     latest = '; '.join(f"{LABELS.get(s, (s,))[0].split(' ·')[0]}: "
-                       f"{max(aware_time(r.get('last_observed_at') or r['timestamp']) for r in rows).tz_convert(timezone_name):%m-%d %H:%M %Z}"
+                       f"{max(aware_time(r.get('last_observed_at') or r['timestamp']) for r in rows):%m-%d %H:%M %Z}"
                        for (s, _), rows in sorted(accepted_groups.items()) if rows)
     point_note = ('PRM: individual readings (errors unavailable). Tracks: individual FLOW fits with fit errors. Lines join daily PRM / 6 h track means.\n'
                   if raw_points else

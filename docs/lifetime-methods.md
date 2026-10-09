@@ -115,6 +115,8 @@ PRM source timestamps are timezone-free Chicago wall-clock readings; localize
 them before UTC normalization and calendar-day grouping. This source convention
 is operator-specified, rather than inferred from the database session timezone.
 Ignition's epoch-based timestamps require no corresponding clock shift.
+The detailed PNG and interactive plots display UTC; their `--timezone` option
+still defines grouping boundaries, not the display clock.
 
 Gas quality is evaluated across the retained archive before six-hour averaging.
 Defaults require ≥3 hours of coverage, no sampling gap >30 minutes, nonnegative
@@ -122,6 +124,15 @@ concentrations and no ≥3-hour exactly flat run. Per-source tolerance and calib
 bounds are configurable. Plateau detection crosses window/export boundaries;
 gaps reset it. There is no forward fill. A rejected analyzer does not contribute
 a lifetime equivalent.
+
+Every gas-equivalent marker and connecting line uses the **midpoint between the
+averaging window's start and end**, in both detailed views and the shifter view.
+The value represents mean concentrations over that window, then one conversion;
+it is not assigned to the left/right bin edge or latest readout. For example,
+06:00–12:00 Chicago during daylight time maps to 11:00–17:00 UTC and is plotted at
+14:00 UTC. Compute the midpoint from timezone-aware instants, including DST
+transitions. Partial windows retain that nominal center and their actual
+coverage metadata; neither centering nor connecting lines implies full exposure.
 
 Mean O₂ and H₂O concentrations are converted once using
 `tau_us = 1 / (k_O2 * mean_O2_ppb + k_H2O * mean_H2O_ppb)`.

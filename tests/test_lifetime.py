@@ -81,6 +81,70 @@ def test_local_day_and_six_hour_boundaries_across_dst(tmp_path, date, offset, ho
     prm = values['prm']; gas = values['gas']
     assert (aware_time(prm['period_end'])-aware_time(prm['period_start'])).total_seconds() == hours*3600
     assert pd.Timestamp(gas['period_end']).hour == 6
+    # The wall-clock interval spans five/seven elapsed hours on DST days.
+    # Its plotted location is still the center of the true UTC interval.
+    a, b = aware_time(gas['period_start']), aware_time(gas['period_end'])
+    assert aware_time(gas['timestamp']) == a+(b-a)/2
+
+
+@pytest.mark.parametrize('view', ['mean', 'raw', 'shifter'])
+def test_utc_axes_and_centered_gas_markers_in_every_view(tmp_path, monkeypatch, view):
+    """Inspect actual PNG artists and HTML traces with unevenly timed data.
+
+    The acquisition-time centroid differs from the nominal bin midpoint, so
+    this catches boundary/last-reading placement as well as an accidental
+    switch to PRM-style mean-reading-time placement for gas equivalents.
+    """
+    import copy
+    import matplotlib.dates as mdates
+    import matplotlib.figure
+    import plotly.graph_objects as go
+    import monitor_plot
+
+    readings = []
+    for i, stamp in enumerate(['00:10:00', '00:50:00', '04:10:00']):
+        for species, value in [('o2', 2+i), ('h2o', 17+i)]:
+            readings.append(row(species, value, '2026-10-09T'+stamp+'-05:00'))
+    records = aggregate_measurements([snapshot(tmp_path, readings)])
+    original_records = copy.deepcopy(records)
+    expected = aware_time('2026-10-09T08:00:00Z')  # 03:00 Chicago.
+    for record in records:
+        assert aware_time(record['timestamp']) == expected
+        assert record['period_start'] == '2026-10-09T00:00:00-05:00'
+        assert record['period_end'] == '2026-10-09T06:00:00-05:00'
+
+    figures = []
+    savefig = matplotlib.figure.Figure.savefig
+    def inspect_png(figure, *args, **kwargs):
+        axis = figure.axes[0]
+        assert 'UTC' in axis.get_xlabel()
+        formatter = axis.xaxis.get_major_formatter()
+        assert str(getattr(formatter, 'tz', getattr(formatter, '_tz', None))) == 'UTC'
+        marker_lines = [line for line in axis.lines if line.get_marker() in ('s', 'x')]
+        assert len(marker_lines) == 2
+        for line in marker_lines:
+            np.testing.assert_allclose(line.get_xdata(orig=False), [mdates.date2num(expected)])
+        return savefig(figure, *args, **kwargs)
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', inspect_png)
+    method = 'to_html' if view == 'shifter' else 'write_html'
+    write = getattr(go.Figure, method)
+    def inspect_html(figure, *args, **kwargs):
+        figures.append(figure)
+        return write(figure, *args, **kwargs)
+    monkeypatch.setattr(go.Figure, method, inspect_html)
+
+    if view == 'shifter':
+        payload = dict(lifetimes=records, generated_at='2026-10-09T16:00:00Z',
+                       raw_prm_measurements=[], input_errors=[], inputs=[], uncertainty='test')
+        monitor_plot.render(payload, tmp_path, dict(timezone='America/Chicago',
+            display_timezone='UTC', display_days=7, maximum_display_us=10000,
+            gas_samples=['gas', 'gas_o2']))
+    else:
+        lifetime.draw_overlay(records, tmp_path/'plot.png', raw_points=view == 'raw')
+    assert records == original_records
+    assert len(figures) == 1 and 'UTC' in figures[0].layout.xaxis.title.text
+    for trace in figures[0].data:
+        assert list(trace.x) == [expected.isoformat()]
 
 
 def test_retry_replaces_results_and_legacy_history_is_reference_only(tmp_path):

@@ -190,6 +190,11 @@ def aggregate_measurements(paths, timezone_name='America/Chicago', quality_confi
         water = bins.get(('h2o', water_sources[0], period)) if water_sources else None
         for oxygen_source in oxygen_sources:
             oxygen = bins.get(('o2', oxygen_source, period))
+            # Place the converted concentration mean at the time-window
+            # midpoint, never the left/right resampling boundary or latest
+            # readout time. This same timestamp feeds both detailed views and
+            # the shifter plot. Use elapsed time between aware boundaries so
+            # a Chicago DST-transition window also has its true UTC midpoint.
             base = dict(timestamp=(period+(end-period)/2).isoformat(),
                 period_start=period.isoformat(), period_end=end.isoformat(),
                 source=oxygen_source, last_observed_at=oxygen['last_observed_at'] if oxygen else None, fit_status='unavailable', lifetime_us=None, error_us=None,

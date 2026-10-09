@@ -43,7 +43,12 @@ def display_value(row):
 
 
 def observed_time(row):
-    """Use mean actual input times where known; never imply a full-day exposure."""
+    """Use mean actual input times where known; never imply a full-day exposure.
+
+    Gas rows have no file members: their timestamp is the midpoint between
+    period_start and period_end, as assigned by aggregate_measurements. Do not
+    replace it with a boundary or the last analyzer readout's timestamp.
+    """
     if row.get('members'):
         seconds = [aware_time(m['timestamp']).timestamp() for m in row['members']]
         return pd.Timestamp(float(np.mean(seconds)), unit='s', tz='UTC').round('us')
