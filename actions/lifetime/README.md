@@ -52,6 +52,11 @@ lifetimes. The All tracks and cosmic-enriched estimates share data and are
 correlated. “All” refers to available selected candidates, not every reconstructed
 track; missing upstream selections or timing associations cannot be inferred.
 
+Pools retain recorded selector settings from both segment and parent track
+outputs, including the track schema. Changed cuts or hit sources therefore
+separate pools. Older FLOW can omit these settings; matching missing metadata
+does not establish equal upstream versions or detector conditions.
+
 ## Running the monitor
 
 Use Python 3.10+ and [the analysis requirements](requirements.txt). Queued operation

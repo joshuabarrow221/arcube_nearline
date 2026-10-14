@@ -38,10 +38,15 @@ configured profile; the optional standalone selection adapter can create sidecar
 `n_ext_trigs == 0`, and the legacy `beam` key has `n_ext_trigs > 0`. Both apply the
 same candidate cuts. Explicit event→track→segment references partition legacy
 segments; stored split datasets must have matching selection settings and both
-categories. Recorded group/dataset settings enter the pool fingerprint; counts
-and previous lifetime results do not. Explicit timing labels must be `beam` and
-`off_beam`, respectively. Legacy files without recorded settings retain an empty
-metadata record: equal missing metadata does not verify equal selector versions,
+categories. Recorded group/dataset settings from both segment and parent track
+outputs enter the pool fingerprint, together with the parent track schema;
+counts and previous lifetime results do not. This includes unified ndlar_flow
+selection parameters and hit-dataset names stored on the track group, even
+when the consumed segment schema is unchanged. The supported standard output
+paths pair `*_segments/data` with `*_tracks/data`; custom paths need an adapter.
+Explicit timing labels must be `beam` and `off_beam`, respectively. Legacy
+files without recorded settings retain empty attribute dictionaries:
+equal missing metadata does not verify equal selector versions,
 so independently reviewed acquisition cohorts remain necessary. Missing
 associations allow only the combined stored selection.
 No branch restores candidates excluded upstream, identifies particle origin,
@@ -87,6 +92,14 @@ The current prospective monitoring gates are:
 - interior, nonsingular exponential fit with chi-square/ndf ≤3 and positive
   inverse lifetime resolved beyond one covariance sigma;
 - ≥95% pedestal coverage in **every** member file, not average coverage.
+
+The inherited attenuation bounds are alpha in [-5, 5] ms⁻¹ and amplitude in
+[0, 50]. An accepted positive interior solution therefore has lifetime
+**greater than 200 µs**. A fit at the upper alpha bound is unavailable, not a
+200-µs measurement or an open-marker candidate. This can limit monitoring during
+low-purity operation; pooling more data does not remove the bound. Extending the
+range needs a separately validated estimator change, including model-quality
+checks, rather than tuning a bound to another method's observed lifetime.
 
 By default each slice uses 100 object-resampling bootstrap trials with fixed
 seeds. Its MPV error is the sample SD of successful replica MPVs (`ddof=1`), not

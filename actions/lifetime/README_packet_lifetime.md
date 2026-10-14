@@ -53,6 +53,12 @@ but does not repair missing calibration or a wrong charge model. Fixed gates and
 window membership are retained regardless of agreement with other methods.
 Failed candidates keep their status when displayed; missing errors are not zero.
 
+The inherited pooled attenuation fit requires an interior solution and caps
+inverse lifetime at 5/ms. It therefore cannot report an accepted lifetime below
+200 µs. Boundary fits stay unavailable; they are not plotted as measurements.
+See the [methods reference](../../docs/lifetime-methods.md#packets) before using
+this estimator during low-purity operation.
+
 Complete native timing arrays are loaded into memory, so worker RAM must suit the
 largest file; `--chunk` is not a total-memory bound. Extraction diagnostics and
 compact hashed objects remain available for audit/retry. A packet failure does

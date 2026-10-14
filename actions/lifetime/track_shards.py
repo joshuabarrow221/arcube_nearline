@@ -27,21 +27,35 @@ def selection_metadata(flow):
     Geometry and calibration metadata alone cannot distinguish changed track
     cuts. Keep both group and dataset attributes, including unfamiliar settings
     conservatively, but omit known counts and optional lifetime-fit outputs.
-    Older files may record no settings; an empty dictionary documents that
-    missing evidence rather than claiming the selector has been verified.
+    Unified ndlar_flow records its configuration on the parent track output,
+    even though this estimator consumes only segments. Preserve those settings
+    and the track schema too: unchanged segment fields do not imply unchanged
+    selection. Empty attribute dictionaries in older files document missing
+    evidence; a schema fingerprint alone cannot verify their selector version.
     """
     result = {}
     for sample, path in (*SPLIT_SAMPLES, ('all_mip', 'analysis/rock_muon_segments/data')):
         if path not in flow:
             continue
-        result[sample] = {}
-        for location, node in [('group', flow[str(Path(path).parent)]), ('dataset', flow[path])]:
-            result[sample][location] = json_value({
-                key: value for key, value in node.attrs.items()
-                if key not in ('selected_track_count', 'selected_segment_count')
-                and not key.startswith('electron_lifetime')
-            })
+        result[sample] = recorded_settings(flow, path)
+        # Standard split/legacy output pairs share the same stem. A segment-
+        # only sidecar legitimately has no parent track dataset; do not invent
+        # its settings. Custom output paths require a separate input adapter.
+        track_path = path.replace('_segments/', '_tracks/')
+        if track_path in flow:
+            result.setdefault('tracks', {})[sample] = dict(
+                recorded_settings(flow, track_path),
+                dtype=json_value(flow[track_path].dtype.descr))
     return result
+
+
+def recorded_settings(flow, path):
+    """Retain selector provenance without turning file counts into pool cuts."""
+    return {location: json_value({
+        key: value for key, value in node.attrs.items()
+        if key not in ('selected_track_count', 'selected_segment_count')
+        and not key.startswith('electron_lifetime')
+    }) for location, node in [('group', flow[str(Path(path).parent)]), ('dataset', flow[path])]}
 
 
 def stored_segments(flow):

@@ -181,7 +181,8 @@ def test_track_partition_uses_reference_rows_not_position(tmp_path):
         track_shards.stored_segments(h)
 
 
-@pytest.mark.parametrize('changed_setting', ['calibration', 'selection'])
+@pytest.mark.parametrize('changed_setting', [
+    'calibration', 'selection', 'track_selection', 'track_hit_source', 'track_schema'])
 def test_pool_retries_do_not_duplicate_and_config_changes_do_not_merge(tmp_path,monkeypatch,changed_setting):
     path,config=profile(tmp_path);source,_=acquisition(config);synthetic_flow(source)
     shards=tmp_path/'shards';calls=[]
@@ -200,8 +201,21 @@ def test_pool_retries_do_not_duplicate_and_config_changes_do_not_merge(tmp_path,
     with h5py.File(source,'r+') as h:
         if changed_setting == 'calibration':
             h['charge/calib_prompt_hits'].attrs['pedestal_file']='new.json'
-        else:
+        elif changed_setting == 'selection':
             h['analysis/rock_muon_segments'].attrs['length_cut']=100.
+        elif changed_setting == 'track_selection':
+            # Unified ndlar_flow records its YAML parameters on the track
+            # group, not the segment group used by the lifetime estimator.
+            h['analysis/rock_muon_tracks'].attrs['length_cut']=100.
+        elif changed_setting == 'track_hit_source':
+            h['analysis/rock_muon_tracks'].attrs['hits_dset_name']='charge/calib_filtered_hits'
+        else:
+            # A schema transition is useful provenance even for an older FLOW
+            # generation that omitted all selector settings. Keep event links
+            # unchanged: only the stored track format changes in this case.
+            del h['analysis/rock_muon_tracks/data']
+            h.create_dataset('analysis/rock_muon_tracks/data',
+                data=np.array([(0,1.),(1,1.)],dtype=[('event_id','i8'),('PCA_i','f8')]))
     track_shards.write_shard(source,shards,'two',meta)
     revised=track_shards.pool_tracks(shards,tmp_path/'fits')
     assert len(revised)==2 and sum(r['n_files'] for r in revised)==2
@@ -212,6 +226,19 @@ def test_pool_retries_do_not_duplicate_and_config_changes_do_not_merge(tmp_path,
     arrays['beam']['dQ']*=2
     np.savez_compressed(object_path,**arrays)
     with pytest.raises(ValueError,match='hash mismatch'):track_shards.pool_tracks(shards,tmp_path/'fits')
+
+
+def test_track_metadata_ignores_result_counts_but_keeps_dataset_settings(tmp_path):
+    source=tmp_path/'flow.h5';synthetic_flow(source)
+    with h5py.File(source,'r+') as h:
+        before=track_shards.selection_metadata(h)
+        # Counts describe statistical membership, not selection configuration.
+        # Pooling files with different numbers of tracks must remain possible.
+        for node in (h['analysis/rock_muon_tracks'],h['analysis/rock_muon_tracks/data']):
+            node.attrs.update(selected_track_count=99,electron_lifetime_us=2000.)
+        assert track_shards.selection_metadata(h)==before
+        h['analysis/rock_muon_tracks/data'].attrs['face_tolerance']=2.1
+        assert track_shards.selection_metadata(h)!=before
 
 
 def test_split_selection_settings_and_timing_are_checked(tmp_path):
