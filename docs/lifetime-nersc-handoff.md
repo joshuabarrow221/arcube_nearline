@@ -136,6 +136,22 @@ This does not establish that the instrument itself stopped taking data; check
 the producer and database ingestion if the operator expects later measurements.
 Fresh page-generation time must not be presented as fresh PRM measurement time.
 
+The October 16 PRM mean is **247.713 ± 15.649 µs SEM** from three positive
+readings. In the latest partial gas window (October 19, 17–23 UTC, observed
+through about 21:15 UTC), raw concentration means are O₂ 1890 **145.892 ppb**,
+O₂ 1874 **10.843 ppb** after ppm normalization, and H₂O **642.576 ppb**. The
+unchanged conversion gives combined equivalents of **1.648 µs** and **9.957 µs**,
+respectively. These pass current software checks, but no verified instrument
+upper calibration limits or gas-to-liquid correction have been supplied. Do
+not promote the numerical result to a validated LAr lifetime. Inspect the
+updated gas concentration plots and source operating conditions before drawing
+a physical conclusion; no thresholds were tuned to suppress these readings.
+The fresh raw export also contains an O₂ 1874 spike to **31.03046 ppm** at
+**October 15, 20:26:26.628 UTC**. Its contribution remains in the affected mean
+under the unchanged policy. Its cause and valid instrument range are unverified;
+the gas concentration companion uses an explicitly logarithmic 1874 panel so
+the full spike and ordinary approximately 10-ppb readings remain visible.
+
 ## 4. Actual execution path and code map
 
 ```text
