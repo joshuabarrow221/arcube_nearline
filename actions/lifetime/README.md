@@ -34,6 +34,11 @@ interpreting them. Missing points mean no usable estimate, not zero lifetime.
 Colored lines connect available points across gaps without filling missing data.
 Current windows can change as more inputs arrive.
 
+Open upward triangles at the upper edge indicate values above the display
+range, not measurements at that height. Hover shows the actual value; the
+original interactive trace, status JSON and diagnostics retain it. The display
+limit does not exclude a PRM reading from its daily mean or reject a fit.
+
 Error bars show conditional track/packet fit uncertainties or PRM standard errors
 of the mean (SEM). Gas uncertainties are not estimated. These bars exclude shared
 calibration and selection systematics; an absent bar does not mean zero error.

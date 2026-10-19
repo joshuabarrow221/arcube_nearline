@@ -26,7 +26,7 @@ variables. Watcher and workers must resolve them identically.
 | `publish_root` | Served plot, diagnostics and status files |
 | `display_days` | Recent interval displayed; does not change pooling |
 | `display_timezone` | Axis clock; example uses UTC, independently of Chicago averaging windows |
-| `maximum_display_us` | Display cap; omitted values remain in diagnostics |
+| `maximum_display_us` | Display cap; off-scale indicators expose retained values |
 | `cohort_rules`, `diagnostic_patterns` | Reviewed acquisition grouping and diagnostic-only runs |
 | `gas_quality_config`, `gas_conversion_config` | Analyzer validity and conversion policy |
 

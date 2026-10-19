@@ -21,7 +21,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from zoneinfo import ZoneInfo
 
-from lifetime import valid_lifetime, packet_candidate_points, TRACK_SAMPLE_DESCRIPTIONS
+from lifetime import valid_lifetime, packet_candidate_points, TRACK_SAMPLE_DESCRIPTIONS, mark_above_range
 from purity_sources import aware_time
 
 # Fixed colors remain consistent between PNG, interactive traces and legends.
@@ -84,7 +84,9 @@ def render(payload, directory, config):
         v,e,candidate = display_value(r)
         if v is None: continue
         if v > config.get('maximum_display_us', 10000):
-            omitted.append(r); continue
+            # Preserve the actual point/line values for interactive zoom. The
+            # range marker below exposes the observation in the bounded view.
+            omitted.append(r)
         # Connect the displayed means of a method continuously. This is only
         # presentation: independent cohorts/configurations were fitted in
         # separate pools and their identities remain in hover/diagnostics.
@@ -129,9 +131,11 @@ def render(payload, directory, config):
     # Use the available vertical space while keeping the fixed diagnostic cap.
     # Error bars participate in scaling; this never changes fit acceptance or
     # removes a point merely to make the chart look more consistent.
-    upper = [v+(e or 0) for points in groups.values() for r,v,e,c in points]
+    upper = [v+(e or 0) for points in groups.values() for r,v,e,c in points
+             if v <= config['maximum_display_us']]
     y_top = min(config['maximum_display_us'], max(1000, 1000*np.ceil(max(upper)*1.08/1000))) if upper else config['maximum_display_us']
     ax.set_ylim(bottom=0,top=y_top)
+    range_note = mark_above_range(ax, interactive, y_top)
     if not groups:
         ax.text(.5,.5,'No usable lifetime measurements yet',transform=ax.transAxes,ha='center',fontsize=16)
         ax.set_xlim(cutoff.to_pydatetime(), newest.to_pydatetime())
@@ -140,6 +144,8 @@ def render(payload, directory, config):
     # One short caveat preserves the candidate meaning without the previous
     # shaded boxes or a large in-plot status narrative.
     fig.text(.09,.04,'Open packet markers: checks failed · Error definitions and coverage in diagnostics',fontsize=10,color='#555555')
+    if range_note:
+        fig.text(.09,.017,range_note,fontsize=9,color='#555555')
     fig.savefig(directory/'elifetime_time_series.png',dpi=200);plt.close(fig)
     interactive.update_layout(template='plotly_white',title='2×2 Electron Lifetime',height=700,
         xaxis_title='Date · '+display_timezone,yaxis_title='Electron lifetime [µs]',
@@ -149,6 +155,7 @@ def render(payload, directory, config):
     chart=interactive.to_html(full_html=False,include_plotlyjs=True,config={'responsive':True,'displaylogo':False})
     page='<html><head><meta charset="utf-8"><title>2×2 Electron Lifetime</title></head><body style="font-family:Arial;margin:20px">'+chart
     page+='<p>Display: '+escape(display_timezone)+'. Averaging windows: '+escape(config['timezone'])+'. '
+    if range_note: page+=escape(range_note)+' '
     page+='PRM: daily means. Tracks and packets: 6 h pooled fits. Gases: 6 h equivalents. Open packet markers fail checks. '
     page+='<a href="elifetime_diagnostics.html">Fit diagnostics and coverage</a> · <a href="elifetime_time_series.png">PNG</a></p></body></html>'
     (directory/'elifetime_time_series.png.html').write_text(page)

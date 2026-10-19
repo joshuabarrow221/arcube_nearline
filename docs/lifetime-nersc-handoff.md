@@ -137,7 +137,18 @@ the producer and database ingestion if the operator expects later measurements.
 Fresh page-generation time must not be presented as fresh PRM measurement time.
 
 The October 16 PRM mean is **247.713 ± 15.649 µs SEM** from three positive
-readings. In the latest partial gas window (October 19, 17–23 UTC, observed
+readings. October 15 instead contains two **exactly 1.0-second** readings,
+at 14:20:55 and 14:36:55 UTC, around one 295.975-µs reading at 14:28:55 UTC.
+The unchanged positive-finite policy gives **666,765.325 ± 333,234.675 µs SEM**
+for that day. Whether 1.0 s is a producer fit limit, sentinel, or measurement
+is unverified. Do not silently discard it or treat the software's `ok` import
+status as waveform-quality validation. An added display-only safeguard marks
+off-scale values with upward triangles and preserves the original values,
+errors, means and HTML traces. Detailed full-range companion plots are retained;
+bounded detailed plots use a 10,000-µs ceiling. The production monitor keeps its
+configured ceiling. Verify the producer convention before changing PRM validity.
+
+In the latest partial gas window (October 19, 17–23 UTC, observed
 through about 21:15 UTC), raw concentration means are O₂ 1890 **145.892 ppb**,
 O₂ 1874 **10.843 ppb** after ppm normalization, and H₂O **642.576 ppb**. The
 unchanged conversion gives combined equivalents of **1.648 µs** and **9.957 µs**,
@@ -517,6 +528,9 @@ HTTP-range test initially failed because the sandbox forbids its local listening
 socket. That specific test then passed with the required socket access. No
 scientific assertion was weakened to obtain a pass. Shell syntax checks and
 independent archive/mean/plot checks are recorded in the final refresh receipts.
+The subsequent off-scale display safeguard adds regression coverage for all
+three views: bounded PNG/HTML axes, visible indicators with actual values, and
+unchanged input readings/means. The final refresh receipts record these tests.
 
 The fresh replay uses the complete retained selection/object inventory, including
 the 235 weekly primary-FLOW captures and the six October 14 primary/native pairs.

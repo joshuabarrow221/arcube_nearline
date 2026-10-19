@@ -594,8 +594,47 @@ def overlay_groups(entries, raw_points=False, raw_prm_measurements=None, timezon
     return dict(groups)
 
 
+def mark_above_range(ax, interactive, ceiling):
+    """Expose off-scale values without censoring inputs or changing any mean.
+
+    Actual marker traces retain their numerical data for interactive zoom.
+    Additional open upward triangles are range indicators, not measurements
+    at the axis limit. Ignore lines-only traces to avoid double-counting means.
+    The raw companion can flag both observations and the corresponding mean.
+    """
+    from html import escape
+    from purity_sources import aware_time
+    import plotly.graph_objects as go
+    points = {}
+    for trace in list(interactive.data):
+        if 'markers' not in (trace.mode or ''):
+            continue
+        color = trace.marker.color or '#555555'
+        for stamp, value in zip(trace.x, trace.y):
+            if value is None or not np.isfinite(value) or value <= ceiling:
+                continue
+            key = (trace.name, str(stamp), float(value))
+            points[key] = (aware_time(stamp), float(value), trace.name or 'Estimate', color)
+    if not points:
+        return ''
+    items = list(points.values())
+    height = ceiling*.98
+    for stamp, value, label, color in items:
+        ax.scatter([stamp.to_pydatetime()], [height], marker='^', s=70,
+                   facecolors='none', edgecolors=color, zorder=8)
+    interactive.add_trace(go.Scatter(x=[t.isoformat() for t,v,l,c in items],
+        y=[height]*len(items), mode='markers', name='Above display range',
+        marker=dict(symbol='triangle-up-open', color=[c for t,v,l,c in items], size=12),
+        customdata=[v for t,v,l,c in items],
+        text=[escape(l) for t,v,l,c in items],
+        hovertemplate='%{x}<br>%{text}<br>Actual value: %{customdata:,.3f} µs<br>Range indicator, not a value at the limit<extra></extra>'))
+    values = [v for t,v,l,c in items]
+    extent = f'{min(values):,.0f}' if min(values) == max(values) else f'{min(values):,.0f}–{max(values):,.0f}'
+    return f'↑ {len(items)} marker(s) above display ({extent} µs); values and means retained in HTML/JSON.'
+
+
 def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotations=None,
-                 raw_points=False, raw_prm_measurements=None):
+                 raw_points=False, raw_prm_measurements=None, maximum_display_us=None):
     """Publish a 3000x2000 PNG and matching self-contained interactive plot.
 
     Raw points are never joined. Connecting only the mean rows makes file-
@@ -776,6 +815,12 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
     fig.suptitle(title, fontsize=15)
     ax.set(xlabel='Date (UTC)', ylabel='Electron lifetime [µs]')
     ax.set_ylim(bottom=0)
+    range_note = ''
+    if maximum_display_us is not None:
+        if not np.isfinite(maximum_display_us) or maximum_display_us <= 0:
+            raise ValueError('maximum_display_us must be positive and finite')
+        ax.set_ylim(0, maximum_display_us)
+        range_note = mark_above_range(ax, interactive, maximum_display_us)
     ax.grid(alpha=0.18)
     # Include individual timestamps when setting the axis: otherwise an
     # excluded latest file or an early raw PRM reading could be clipped away.
@@ -833,6 +878,8 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
             'Gas conversion/packet selections provisional. Lines connect displayed points across gaps as visual guides, not interpolated measurements.\n'
             'External triggers do not establish beam origin. PRM means use recorded positive lifetimes; waveform quality is not verified.\n'
             f'Failed/unavailable entries: {failed}; reviewed track exclusions: {excluded} (retained in JSON / raw plot). Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}.')
+    if range_note:
+        note += '\n' + range_note
     gas_fields = sorted({r['gas_conversion']['field_strength_vpercm'] for r in entries if r.get('gas_conversion')})
     if gas_fields:
         note += '\nGas: Eva 2026-10-06 rates at ' + ', '.join(f'{v:g}' for v in gas_fields) + ' V/cm reference field; raw DB concentrations; offset/phase mapping unverified.'
@@ -866,6 +913,8 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
     interactive.update_layout(title=title,
         xaxis_title='Timestamp (UTC)', yaxis_title='Electron lifetime [µs]',
         yaxis_rangemode='tozero', template='plotly_white', width=1500, height=1000)
+    if maximum_display_us is not None:
+        interactive.update_yaxes(range=[0, maximum_display_us])
     interactive.add_annotation(text=note.replace('\n', '<br>'), x=0, y=-0.20, xref='paper', yref='paper',
                                showarrow=False, align='left', xanchor='left', yanchor='top', font=dict(size=11))
     interactive.update_layout(margin=dict(b=310 if packet_candidates else 220), legend=dict(font=dict(size=11)))

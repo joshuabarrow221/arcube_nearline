@@ -608,3 +608,60 @@ def test_track_audit_shows_singletons_and_leave_one_out_influence():
     assert pair['monitoring_mean_us'] == 740
     assert [r['leave_one_out_mean_us'] for r in pair['contributions']] == [920, 740]
     assert [r['mean_change_when_omitted_us'] for r in pair['contributions']] == [90, -90]
+
+
+@pytest.mark.parametrize('view', ['mean', 'raw', 'shifter'])
+def test_large_prm_values_remain_visible_as_range_indicators(tmp_path, monkeypatch, view):
+    """One-second source values must neither vanish nor silently change a mean.
+
+    Check both exported surfaces and input immutability with the actual PRM
+    aggregation path. The upper-edge marker must expose the true number;
+    original interactive traces must retain every observed/mean value.
+    """
+    import copy
+    import matplotlib.figure
+    import plotly.graph_objects as go
+    import monitor_plot
+    from purity_sources import load_measurements, prm_observations
+
+    readings = [row('prm_lifetime', v, f'2026-10-15T09:{minute}:00-05:00')
+                for v, minute in [(1., '20'), (.0003, '28'), (1., '36')]]
+    source = snapshot(tmp_path, readings)
+    frame = load_measurements([source])
+    records = aggregate_measurements([source])
+    raw = prm_observations(frame)
+    expected = (1e6+300+1e6)/3
+    assert records[0]['lifetime_us'] == expected
+    before = copy.deepcopy((records, raw))
+    figures, axes = [], []
+    savefig = matplotlib.figure.Figure.savefig
+    def inspect_png(figure, *args, **kwargs):
+        axes.append(figure.axes[0].get_ylim())
+        assert any('above display' in text.get_text() for text in figure.texts)
+        assert figure.axes[0].collections
+        return savefig(figure, *args, **kwargs)
+    monkeypatch.setattr(matplotlib.figure.Figure, 'savefig', inspect_png)
+    method = 'to_html' if view == 'shifter' else 'write_html'
+    original = getattr(go.Figure, method)
+    def capture(figure, *args, **kwargs):
+        figures.append(figure)
+        return original(figure, *args, **kwargs)
+    monkeypatch.setattr(go.Figure, method, capture)
+    if view == 'shifter':
+        monitor_plot.render(dict(lifetimes=records, raw_prm_measurements=raw,
+            generated_at='2026-10-16T00:00:00Z', inputs=[], input_errors=[], uncertainty='test'),
+            tmp_path, dict(timezone='America/Chicago', display_timezone='UTC',
+                           display_days=7, maximum_display_us=10000, gas_samples=['gas']))
+    else:
+        lifetime.draw_overlay(records, tmp_path/'range.png', raw_points=view=='raw',
+                              raw_prm_measurements=raw, maximum_display_us=10000)
+    assert (records, raw) == before
+    assert len(figures) == len(axes) == 1
+    figure = figures[0]
+    assert axes[0] == (0, 10000)
+    assert tuple(figure.layout.yaxis.range) == (0, 10000)
+    indicator = next(t for t in figure.data if t.name == 'Above display range')
+    assert expected in indicator.customdata
+    assert len(indicator.x) == (3 if view == 'raw' else 1)
+    assert indicator.marker.symbol == 'triangle-up-open'
+    assert any(expected in t.y for t in figure.data if t.name != 'Above display range')

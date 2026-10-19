@@ -14,6 +14,13 @@ to obtain an acceptable fit. Points use mean member-file start time or mean PRM
 reading time; gas points use the window midpoint. These do not imply continuous
 exposure. Incomplete windows update as inputs arrive.
 
+Display limits do not change input validity, means or fits. The monitor retains
+off-scale values in its original HTML traces and status/diagnostics, with open
+upward triangles at the upper edge advertising their actual values in hover.
+The standalone `draw_overlay(..., maximum_display_us=...)` supports the same
+bounded view; omitting that argument preserves a full-range study plot. These
+range indicators are not measurements at the axis ceiling or failed-fit labels.
+
 Detector observations are pooled **before fitting**. Default cohorts are full
 acquisition directories; reconstruction/selection/calibration fingerprints must
 also agree. Explicit `cohort_rules` can merge independently verified compatible
