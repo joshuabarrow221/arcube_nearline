@@ -2,6 +2,8 @@
 
 For plot interpretation see the [lifetime README](../actions/lifetime/README.md).
 [Methods and implementation](lifetime-methods.md) covers fitting details.
+The [October 2026 NERSC handoff](lifetime-nersc-handoff.md) records migration
+context, the corrected historical snapshot archive, and outstanding site checks.
 
 ## Configuration
 

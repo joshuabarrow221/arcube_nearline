@@ -96,7 +96,9 @@ The action reads source files without modifying them, stores reusable selected
 segments/charge objects, and refits compatible six-hour pools when membership
 changes. It never averages failed per-file fits or imports measurements from a
 published plot. PRM readings are deduplicated before averaging. Gas quality checks
-reject sustained plateaus, inadequate coverage and configured calibration limits.
+reject sustained exactly flat readings (with configurable tolerance), inadequate
+coverage and configured calibration limits. A nearly flat noisy analyzer can
+pass the default zero-tolerance check; this does not validate its calibration.
 
 Publication preserves the existing filenames:
 
