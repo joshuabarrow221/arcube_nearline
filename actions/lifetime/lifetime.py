@@ -874,8 +874,10 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
     point_note = ('PRM: individual readings (errors unavailable). Tracks: individual FLOW fits with fit errors. Lines join daily PRM / 6 h track means.\n'
                   if raw_points else
                   'PRM bars: daily SEM. Tracks: 6 h file means; bars = max(propagated fit error, between-file SEM), where available.\n')
+    provisional = ('Gas conversion/packet selections provisional.' if any(
+        r.get('sample') == 'packet' for r in entries) else 'Gas conversion provisional.')
     note = (point_note +
-            'Gas conversion/packet selections provisional. Lines connect displayed points across gaps as visual guides, not interpolated measurements.\n'
+            provisional + ' Lines connect displayed points across gaps as visual guides, not interpolated measurements.\n'
             'External triggers do not establish beam origin. PRM means use recorded positive lifetimes; waveform quality is not verified.\n'
             f'Failed/unavailable entries: {failed}; reviewed track exclusions: {excluded} (retained in JSON / raw plot). Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}.')
     if range_note:
@@ -896,8 +898,15 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
     if raw_points:
         note += '\nOpen squares: means at mean acquisition times. Horizontal bars: first–last contributing observations, not full-window coverage.'
     import textwrap
-    fig.text(0.08, 0.045, note + '\nLatest accepted data: ' + '\n'.join(textwrap.wrap(latest or 'none', 145)), fontsize=8, va='bottom')
-    fig.tight_layout(rect=(0, (0.22 if gas_fields else 0.20) if packet_candidates else 0.16, 1, 0.96))
+    footer = fig.text(0.08, 0.045, note + '\nLatest accepted data: ' + '\n'.join(textwrap.wrap(latest or 'none', 145)), fontsize=8, va='bottom')
+    # Raw-reading notes and source-freshness lines can exceed a fixed bottom
+    # margin. Measure the actual text before layout so it cannot overlap the
+    # UTC axis label; retain the requested 3000x2000 canvas and all source data.
+    fig.canvas.draw()
+    footer_top = footer.get_window_extent(fig.canvas.get_renderer()).transformed(fig.transFigure.inverted()).y1
+    bottom = max((0.22 if gas_fields else 0.20) if packet_candidates else 0.16,
+                 footer_top + 0.015)
+    fig.tight_layout(rect=(0, bottom, 1, 0.96))
     target = Path(output_file)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(suffix='.png', dir=target.parent)
@@ -917,7 +926,8 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
         interactive.update_yaxes(range=[0, maximum_display_us])
     interactive.add_annotation(text=note.replace('\n', '<br>'), x=0, y=-0.20, xref='paper', yref='paper',
                                showarrow=False, align='left', xanchor='left', yanchor='top', font=dict(size=11))
-    interactive.update_layout(margin=dict(b=310 if packet_candidates else 220), legend=dict(font=dict(size=11)))
+    interactive.update_layout(margin=dict(b=max(310 if packet_candidates else 220,
+        16 * (note.count('\n') + 1) + 140)), legend=dict(font=dict(size=11)))
     fd, temporary = tempfile.mkstemp(suffix='.html', dir=target.parent)
     os.close(fd)
     try:
