@@ -143,7 +143,12 @@ def render(payload, directory, config):
     if groups:ax.legend(loc='lower center',bbox_to_anchor=(.5,1.015),ncol=3,frameon=False,fontsize=11)
     # One short caveat preserves the candidate meaning without the previous
     # shaded boxes or a large in-plot status narrative.
-    fig.text(.09,.04,'Open packet markers: checks failed · Error definitions and coverage in diagnostics',fontsize=10,color='#555555')
+    # Describe open packet markers only when such markers are actually drawn;
+    # a packet-disabled refresh should not imply missing packet points.
+    packet_candidates_visible = any(c for (sample, _), points in groups.items()
+                                    if sample == 'packet' for r, v, e, c in points)
+    candidate_note = 'Open packet markers: checks failed · ' if packet_candidates_visible else ''
+    fig.text(.09,.04,candidate_note+'Error definitions and coverage in diagnostics',fontsize=10,color='#555555')
     if range_note:
         fig.text(.09,.017,range_note,fontsize=9,color='#555555')
     fig.savefig(directory/'elifetime_time_series.png',dpi=200);plt.close(fig)
@@ -156,7 +161,11 @@ def render(payload, directory, config):
     page='<html><head><meta charset="utf-8"><title>2×2 Electron Lifetime</title></head><body style="font-family:Arial;margin:20px">'+chart
     page+='<p>Display: '+escape(display_timezone)+'. Averaging windows: '+escape(config['timezone'])+'. '
     if range_note: page+=escape(range_note)+' '
-    page+='PRM: daily means. Tracks and packets: 6 h pooled fits. Gases: 6 h equivalents. Open packet markers fail checks. '
+    # Match the PNG caption and active configuration: a packet-disabled run
+    # must not advertise packet fits or markers that the viewer cannot find.
+    pooled_methods = 'Tracks and packets' if config.get('packet_enabled', True) else 'Tracks'
+    page+='PRM: daily means. '+pooled_methods+': 6 h pooled fits. Gases: 6 h equivalents. '
+    if packet_candidates_visible: page+='Open packet markers fail checks. '
     page+='<a href="elifetime_diagnostics.html">Fit diagnostics and coverage</a> · <a href="elifetime_time_series.png">PNG</a></p></body></html>'
     (directory/'elifetime_time_series.png.html').write_text(page)
     # Full failures and redundant external-trigger fits stay available off the
