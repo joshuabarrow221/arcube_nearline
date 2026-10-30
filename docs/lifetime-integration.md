@@ -97,6 +97,16 @@ processing original FLOW/native inputs, not importing published lifetime values.
 **The watcher does not connect to DAQ05.** Export and transfer are implemented
 companion steps; their credentials, SSH route and schedules are site configuration.
 
+For a complete **NERSC-initiated query over SSH**, use the
+[remote-export guide](lifetime-remote-export.md) and
+[`fetch_purity.py`](../extra/data_mgmt/fetch_purity.py). It sends the repository's
+exporter modules to the database host and receives completed JSON directly into
+`snapshot_root`; no OneDrive script or remote repository checkout is required.
+The NERSC fetch client uses only standard-library Python and OpenSSH. The remote
+interpreter needs [exporter requirements](../actions/lifetime/requirements-export.txt)
+and local database credentials. Fetching does not run the fit/plot workload.
+This is an alternative to the producer/rsync arrangement below.
+
 | Step | Host | Action |
 |---|---|---|
 | Export | DAQ05 or another database-reachable host | `export_purity.sh` queries sources read-only and writes completed snapshots |

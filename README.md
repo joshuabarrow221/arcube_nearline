@@ -50,3 +50,6 @@ FLOW, native packets and received slow-control snapshots. The watcher does not
 connect to DAQ05 itself: companion export/rsync scripts supply those snapshots.
 See the [operator guide](docs/lifetime-integration.md) for configuration and
 scheduling, and [methods reference](docs/lifetime-methods.md) for inner workings.
+The [remote-export guide](docs/lifetime-remote-export.md) gives a complete
+NERSC-to-DAQ05 SSH query workflow using only code in this repository; database
+credentials and approved site access are supplied separately.

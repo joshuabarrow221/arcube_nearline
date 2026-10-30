@@ -89,7 +89,12 @@ acquisition without adding duplicate weight. Updates also work with only PRM
 and gas data available.
 
 **DAQ05 transfer is a separate step.** The watcher consumes local snapshots; it
-does not query DAQ05. [export_purity.sh](../../extra/data_mgmt/export_purity.sh)
+does not query DAQ05. For NERSC-initiated queries,
+[fetch_purity.py](../../extra/data_mgmt/fetch_purity.py) runs this repository's
+exporter over SSH and receives completed snapshots; follow the
+[remote-export guide](../../docs/lifetime-remote-export.md). It requires no
+OneDrive files or permanent remote checkout. Alternatively,
+[export_purity.sh](../../extra/data_mgmt/export_purity.sh)
 queries the configured databases on a reachable host;
 [sync_purity.sh](../../extra/data_mgmt/sync_purity.sh) receives those snapshots with
 `rsync` and refreshes the monitor. Operators configure access and schedule both

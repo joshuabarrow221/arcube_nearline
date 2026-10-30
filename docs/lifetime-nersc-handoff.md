@@ -306,6 +306,16 @@ mtime, change the profile's `reprocess_token`. Do not mutate calibrations in pla
 
 ## 6. DAQ05 and future automatic source updates
 
+**October 30 portability update:** the committed
+[`fetch_purity.py`](../extra/data_mgmt/fetch_purity.py) now supports initiating
+the query directly from a NERSC clone. It transmits the shared exporter modules,
+uses credentials only on the database host, and validates/atomically publishes
+returned snapshots. No local development scripts or remote checkout are needed.
+See the [student/operator walkthrough](lifetime-remote-export.md), including
+remote Python dependencies, approved SSH access and scheduling. This launcher
+has offline transport/export tests; live NERSC access still needs site validation.
+The historical local route below describes the October 19 export.
+
 **The watcher does not SSH to DAQ05 or query a database.** Export, transfer and
 watching are separate implemented steps whose schedules/access remain site work.
 The local read-only route authorized by the user was:
@@ -317,9 +327,10 @@ ssh -J acdcs@acd-gw06.fnal.gov acdcs@acd-daq05.fnal.gov
 Treat DAQ05 as a live acquisition host. Read-only SQL and a narrow Python process
 were used; no services, DAQ configurations or database contents were changed.
 Do not copy credentials into Git, JSON snapshots, CLI arguments or public logs.
-The local exporter read the existing credential file in place on DAQ05; the
-production wrapper instead resolves credentials through protected environment
-variables referenced by `sources.example.json`.
+The local exporter read the existing credential file in place on DAQ05. The
+producer/rsync example resolves credentials through protected environment
+variables referenced by `sources.example.json`; the new SSH fetch route also
+supports the existing remote INI directly, without copying its contents.
 
 Verified source contract:
 

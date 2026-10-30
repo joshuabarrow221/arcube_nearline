@@ -1,0 +1,8 @@
+# Database-host environment for fetch_purity.py; no detector/plotting packages.
+# NERSC's transport-only client uses Python standard library + OpenSSH.
+numpy>=1.26
+pandas>=2.0
+SQLAlchemy>=2.0
+psycopg2-binary>=2.9
+tzdata>=2024.1
+# Install influxdb>=5.3 separately only for explicitly configured legacy Influx.
