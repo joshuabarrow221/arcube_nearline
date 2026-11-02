@@ -11,6 +11,72 @@ from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 import warnings
 
+
+class InvalidAttenuationCovariance(ValueError):
+    """Keep the numerical attempt inspectable without publishing a lifetime."""
+
+    def __init__(self, message, diagnostics):
+        super().__init__(message)
+        self.fit_diagnostics = diagnostics
+
+
+def attenuation_covariance_diagnostics(covariance):
+    """Check whether the two-parameter covariance represents a resolved fit.
+
+    Bounded scipy curve_fit uses a pseudoinverse for a rank-deficient Jacobian.
+    For a near-constant exponential this can return a tiny positive tau variance
+    even when tau is unconstrained, rather than a useful uncertainty. Test the
+    dimensionless correlation matrix: rank tests on the raw covariance depend
+    on the incomparable amplitude/tau units. The threshold below is floating-
+    point numerical rank, not a lifetime range or statistical-significance cut.
+    """
+    cov = np.asarray(covariance, dtype=float)
+    result = dict(valid=False, reason=None, correlation=None,
+                  eigenvalues=None, rank_tolerance=None)
+    if cov.shape != (2, 2):
+        result['reason'] = 'expected a 2 by 2 attenuation covariance'
+        return result
+    if not np.all(np.isfinite(cov)):
+        result['reason'] = 'nonfinite attenuation covariance'
+        return result
+    variances = np.diag(cov)
+    if np.any(variances <= 0):
+        result['reason'] = 'nonpositive attenuation parameter variance'
+        return result
+    scale = np.sqrt(variances)
+    # Divide sequentially to avoid overflow/underflow in an outer product of
+    # very different parameter scales. Nonfinite normalization is a failure.
+    with np.errstate(over='ignore', invalid='ignore', divide='ignore'):
+        correlation = cov / scale[:, None] / scale[None, :]
+    if not np.all(np.isfinite(correlation)):
+        result['reason'] = 'nonfinite normalized attenuation covariance'
+        return result
+    result['correlation'] = correlation.tolist()
+    norm = float(np.linalg.norm(correlation, 2))
+    if not np.isfinite(norm):
+        result['reason'] = 'nonfinite normalized attenuation covariance norm'
+        return result
+    tolerance = np.finfo(float).eps * len(cov) * max(1., norm)
+    result['rank_tolerance'] = float(tolerance)
+    if not np.allclose(correlation, correlation.T, rtol=0, atol=tolerance):
+        result['reason'] = 'asymmetric normalized attenuation covariance'
+        return result
+    eigenvalues = np.linalg.eigvalsh(correlation / 2 + correlation.T / 2)
+    if not np.all(np.isfinite(eigenvalues)):
+        result['reason'] = 'nonfinite normalized attenuation covariance eigenvalues'
+        return result
+    result['eigenvalues'] = eigenvalues.tolist()
+    if eigenvalues[0] <= tolerance:
+        result['reason'] = 'singular or non-positive-definite normalized attenuation covariance'
+        return result
+    result['valid'] = True
+    return result
+
+
+def finite_diagnostic(value):
+    """A failed numerical diagnostic must still be representable in strict JSON."""
+    return float(value) if np.isfinite(value) else None
+
 def convolution(hist_a, edges_a, hist_b, edges_b):
     """Preserve the legacy discrete-bin convolution and first-grid axis.
 
@@ -163,13 +229,29 @@ def langau_lifetime(nhits, dqdx, time_drifted, time_bins, dqdx_bins, nhits_bins,
     x_fit = np.linspace(times[0], times[-1],1000)
     fit_curve = ElectronLifetimeFunc(x_fit, *params)
     
+    # Validate before rounding the legacy public error or creating a plot. A
+    # genuine sub-microsecond uncertainty may round to zero and is not rejected;
+    # a rank-deficient covariance must not masquerade as tau +/- zero instead.
+    check = attenuation_covariance_diagnostics(cov)
+    diagnostics = dict(chi2=finite_diagnostic(chi2), ndf=ndf, chi2_ndf=finite_diagnostic(chi2/ndf),
+        drift_time_us=times.tolist(), mpv=[finite_diagnostic(v) for v in mpvs],
+        mpv_error=[finite_diagnostic(v) for v in mpv_uncertainties],
+        fitted_bins=np.flatnonzero(fitted).tolist(), segments_per_bin=[int(m.sum()) for m in masks],
+        candidate_parameters=dict(amplitude=finite_diagnostic(params[0]), lifetime_us=finite_diagnostic(params[1])),
+        candidate_error_us_unrounded=(finite_diagnostic(np.sqrt(cov[1, 1]))
+            if cov.shape == (2, 2) and np.isfinite(cov[1, 1]) and cov[1, 1] >= 0 else None),
+        attenuation_covariance=[[finite_diagnostic(value) for value in row] for row in cov],
+        attenuation_covariance_check=check,
+        uncertainty='weighted attenuation covariance; proxy MPV errors from unweighted slice-fit covariance')
+    if not check['valid']:
+        # The caller records this attempted fit with null accepted lifetime and
+        # error. No diagnostic figure is saved that could imply a credible tau.
+        raise InvalidAttenuationCovariance('Invalid attenuation covariance: ' + check['reason'], diagnostics)
+
     fig, ax = plt.subplots()
     # Attach machine-readable diagnostics without changing the public three-
     # value return signature used by the older lifetime entry points.
-    fig.lifetime_diagnostics = dict(chi2=float(chi2), ndf=ndf, chi2_ndf=float(chi2/ndf),
-        drift_time_us=times.tolist(), mpv=mpvs.tolist(), mpv_error=mpv_uncertainties.tolist(),
-        fitted_bins=np.flatnonzero(fitted).tolist(), segments_per_bin=[int(m.sum()) for m in masks],
-        uncertainty='weighted attenuation covariance; proxy MPV errors from unweighted slice-fit covariance')
+    fig.lifetime_diagnostics = diagnostics
 
     #Set y lim
     ax.set_ylim(min(mpvs)-2,max(mpvs)+2) 

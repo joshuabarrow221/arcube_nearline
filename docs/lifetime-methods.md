@@ -80,6 +80,19 @@ file-to-file SEMs or total experimental uncertainties. Shared calibration,
 selection, track/event correlations and within-window variation are excluded.
 Errors of the overlapping track curves cannot be combined as independent errors.
 
+The attenuation covariance must also be numerically usable before reporting a
+lifetime. Its unrounded variances must be finite and positive, and its
+correlation-normalized matrix must be symmetric, positive definite and full
+rank at floating-point precision. Normalizing removes the arbitrary difference
+between amplitude and lifetime units. A singular covariance is a failed fit:
+the accepted lifetime/error remain null, while candidate parameters and drift
+diagnostics remain available for investigation. This is not an upper-lifetime
+cut, a change to track selection, or a requirement to agree with another method.
+In particular, a flat/rising proxy curve can drive the positive-decay fit toward
+infinite lifetime. The bounded solver's pseudoinverse covariance can then give
+a tiny spurious variance, which legacy integer rounding displays as zero error.
+See [SciPy's covariance documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.curve_fit.html).
+
 ## Packets
 
 The configured extractor uses the exact static pedestal JSON named in matching

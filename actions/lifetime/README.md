@@ -118,6 +118,10 @@ Publication preserves the existing filenames:
 
 If a series stops updating, check diagnostics, input timestamps and worker logs.
 A failed fit remains a status record; other available methods can still update.
+Track fits with a degenerate attenuation covariance also remain failures, even
+if the optimizer returns a finite number. Their candidate parameters are kept
+in diagnostics; a nominally enormous lifetime with a spurious zero error is not
+promoted to a monitoring point.
 The last complete web generation survives a publication failure. See the
 [operator guide](../../docs/lifetime-integration.md#recovery-and-maintenance) for
 retries, permissions and rollback.

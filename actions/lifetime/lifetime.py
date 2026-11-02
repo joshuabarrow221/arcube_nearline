@@ -204,6 +204,12 @@ def fit_samples(input_file, output_file_plot, requested_samples=None, timestamp=
                 )
             except Exception as exc:
                 result['fit_message'] = f'{type(exc).__name__}: {exc}'
+                if hasattr(exc, 'fit_diagnostics'):
+                    # Numerical failure still has useful source-bin/candidate
+                    # evidence. Keep it without promoting the attempted tau to
+                    # a measured lifetime or inventing an uncertainty.
+                    result['fit_diagnostics'] = exc.fit_diagnostics
+                    result['fit_quality'] = 'invalid_attenuation_covariance'
                 print(f'Lifetime fit failed for {sample}: {result["fit_message"]}')
 
             results.append(result)
