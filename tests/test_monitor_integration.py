@@ -241,6 +241,50 @@ def test_track_metadata_ignores_result_counts_but_keeps_dataset_settings(tmp_pat
         assert track_shards.selection_metadata(h)!=before
 
 
+@pytest.mark.parametrize('changed_file', ['track_shards.py', 'lifetime.py', 'lifetime_funcs.py'])
+def test_track_pool_cache_refits_after_estimator_or_policy_revision(tmp_path, monkeypatch, changed_file):
+    """Unchanged observations must not reuse a pre-revision acceptance decision.
+
+    Model a source-file revision without editing the checkout. This exercises
+    the real cache fingerprint rather than substituting a hand-built cache key.
+    The fitter is a counting stub because scheduling, not fit physics, is the
+    contract being protected here.
+    """
+    _, config = profile(tmp_path)
+    source, _ = acquisition(config)
+    synthetic_flow(source)
+    shards, output = tmp_path/'shards', tmp_path/'fits'
+    track_shards.write_shard(source, shards, 'one',
+        dict(timestamp='2026-10-05T08:00:00-05:00', cohort='stable'))
+    calls = []
+
+    def fit(file, plot, timestamp):
+        calls.append(file)
+        return [dict(timestamp=timestamp, sample='all_mip', fit_status='ok',
+                     lifetime_us=float(1000*len(calls)), error_us=10.)]
+
+    monkeypatch.setattr(track_shards, 'fit_samples', fit)
+    original = track_shards.pool_tracks(shards, output)
+    assert track_shards.pool_tracks(shards, output) == original
+    assert len(calls) == 1
+
+    actual_read = Path.read_bytes
+    revised_path = Path(track_shards.__file__).with_name(changed_file).resolve()
+
+    def read_revision(path):
+        content = actual_read(path)
+        return content + b'\n# simulated estimator/policy revision\n' if path.resolve() == revised_path else content
+
+    monkeypatch.setattr(Path, 'read_bytes', read_revision)
+    revised = track_shards.pool_tracks(shards, output)
+    assert len(calls) == 2
+    assert revised[0]['fit_code_sha256'] != original[0]['fit_code_sha256']
+    assert revised[0]['lifetime_us'] == 2000.
+    assert revised[0]['members'] == original[0]['members']
+    assert track_shards.pool_tracks(shards, output) == revised
+    assert len(calls) == 2
+
+
 def test_split_selection_settings_and_timing_are_checked(tmp_path):
     source=tmp_path/'flow.h5'; original=synthetic_flow(source)
     with h5py.File(source,'r+') as h:

@@ -37,6 +37,13 @@ SPLIT_SAMPLES = (
 )
 LEGACY_SAMPLE = ('all_mip', 'analysis/rock_muon_segments/data')
 
+# Monitoring acceptance is separate from the axis range and from numerical
+# convergence. Apply the requested ceiling to tracks only, before rounding,
+# while retaining rejected parameters in the diagnostic record. It is not a
+# goodness-of-fit test or a physical upper limit on electron lifetime.
+TRACK_MAX_LIFETIME_US = 20_000.
+TRACK_ACCEPTANCE_VERSION = 'track-lifetime-ceiling-20000us-v1'
+
 # Keep the short legend labels while exposing their precise scope in hover
 # and diagnostics. "All" is limited to available upstream-selected candidates,
 # not every reconstructed track, hit, event, or physical muon in the detector.
@@ -106,9 +113,11 @@ def sample_plot_path(output_file_plot, sample, multiple_samples):
 
 
 def classify_fit_quality(lifetime_us, error_us):
-    """Add a diagnostic flag without turning policy thresholds into fit failures."""
+    """Describe numerical/range quality; this does not validate model agreement."""
     if not np.isfinite(lifetime_us) or not np.isfinite(error_us) or lifetime_us <= 0:
         return 'nonphysical'
+    if lifetime_us > TRACK_MAX_LIFETIME_US:
+        return 'above_lifetime_limit'
     if error_us < 0 or error_us >= lifetime_us:
         return 'poorly_constrained'
     if lifetime_us > 10_000:
@@ -160,6 +169,8 @@ def fit_samples(input_file, output_file_plot, requested_samples=None, timestamp=
                 'fit_status': 'failed',
                 'lifetime_us': None,
                 'error_us': None,
+                'track_acceptance_version': TRACK_ACCEPTANCE_VERSION,
+                'maximum_lifetime_us': TRACK_MAX_LIFETIME_US,
             }
 
             if 'source_flow_url' in h5_file.attrs:
@@ -167,6 +178,7 @@ def fit_samples(input_file, output_file_plot, requested_samples=None, timestamp=
                 result['flow_source_etag'] = h5_file.attrs['source_etag']
                 result['flow_source_size_bytes'] = int(h5_file.attrs['source_size_bytes'])
                 result['flow_datasets'] = json.loads(h5_file.attrs['source_datasets'])
+            fig = None
             try:
                 if not len(segments):
                     raise ValueError('no valid segments')
@@ -180,28 +192,31 @@ def fit_samples(input_file, output_file_plot, requested_samples=None, timestamp=
                     nhits_bins=np.linspace(0, 30, 42),
                     wanted_title=f'{timestamp} ({sample})',
                 )
-                plot_path = sample_plot_path(output_file_plot, sample, multiple_samples)
-                plot_path.parent.mkdir(parents=True, exist_ok=True)
-                fig.savefig(plot_path)
-                plt.close(fig)
-
                 lifetime = float(lifetime)
                 lifetime_error = float(lifetime_error)
                 if not np.isfinite(lifetime) or not np.isfinite(lifetime_error) or lifetime <= 0 or lifetime_error < 0:
                     raise ValueError('nonphysical or nonfinite fit result')
-                result.update(
-                    fit_status='ok',
-                    fit_quality=classify_fit_quality(lifetime, lifetime_error),
-                    lifetime_us=lifetime,
-                    error_us=lifetime_error,
-                    plot_file=str(plot_path),
-                )
-                if hasattr(fig, 'lifetime_diagnostics'):
-                    result['fit_diagnostics'] = fig.lifetime_diagnostics
-                print(
-                    f'Timestamp: {timestamp}, sample: {sample}, '
-                    f'lifetime: {lifetime} +- {lifetime_error} us'
-                )
+                diagnostics = getattr(fig, 'lifetime_diagnostics', {})
+                if diagnostics:
+                    result['fit_diagnostics'] = diagnostics
+                # The legacy return value rounds tau to 0.001 us. Use the
+                # unrounded candidate so 20000.0004 cannot round into the
+                # accepted interval. A mocked/older fitter can omit metadata.
+                candidate = float(diagnostics.get('candidate_parameters', {}).get('lifetime_us', lifetime))
+                candidate_error = float(diagnostics.get('candidate_error_us_unrounded', lifetime_error))
+                if candidate > TRACK_MAX_LIFETIME_US:
+                    result.update(fit_status='rejected', fit_quality='above_lifetime_limit',
+                        candidate_lifetime_us=candidate, candidate_error_us=candidate_error,
+                        fit_message=f'Track lifetime exceeds {TRACK_MAX_LIFETIME_US:g} us acceptance ceiling')
+                    print(f'Track fit rejected for {sample}: {result["fit_message"]}')
+                else:
+                    plot_path = sample_plot_path(output_file_plot, sample, multiple_samples)
+                    plot_path.parent.mkdir(parents=True, exist_ok=True)
+                    fig.savefig(plot_path)
+                    result.update(fit_status='ok',
+                        fit_quality=classify_fit_quality(candidate, candidate_error),
+                        lifetime_us=lifetime, error_us=lifetime_error, plot_file=str(plot_path))
+                    print(f'Timestamp: {timestamp}, sample: {sample}, lifetime: {lifetime} +- {lifetime_error} us')
             except Exception as exc:
                 result['fit_message'] = f'{type(exc).__name__}: {exc}'
                 if hasattr(exc, 'fit_diagnostics'):
@@ -209,8 +224,13 @@ def fit_samples(input_file, output_file_plot, requested_samples=None, timestamp=
                     # evidence. Keep it without promoting the attempted tau to
                     # a measured lifetime or inventing an uncertainty.
                     result['fit_diagnostics'] = exc.fit_diagnostics
-                    result['fit_quality'] = 'invalid_attenuation_covariance'
+                    result['fit_quality'] = getattr(exc, 'fit_quality', 'fit_failed')
                 print(f'Lifetime fit failed for {sample}: {result["fit_message"]}')
+            finally:
+                # Rejected fits must not leak figures during large local or
+                # watcher replays, nor leave a plot implying accepted tau.
+                if fig is not None:
+                    plt.close(fig)
 
             results.append(result)
 
@@ -229,7 +249,7 @@ def write_hdf5_metadata(input_file, results):
             attrs['electron_lifetime_fit_n_segments'] = result['n_segments']
             attrs['electron_lifetime_fit_quality'] = result.get('fit_quality', 'fit_failed')
             attrs['electron_lifetime_fit_quality_definition'] = (
-                'diagnostic only: positive finite result, error < lifetime, lifetime <= 10000 us'
+                'tracks above 20000 us rejected; other quality flags diagnostic; no goodness-of-fit acceptance cut'
             )
             attrs['electron_lifetime_fit_method'] = (
                 'Landau-Gaussian proxy MPV versus drift time; exponential attenuation fit'
@@ -255,8 +275,17 @@ def record_key(entry):
 
 
 def valid_lifetime(entry):
-    """Numerical fit validity, independent of any monitoring exclusion review."""
+    """Numerical/range acceptance, separate from review and physical validity.
+
+    Enforce the track ceiling again at aggregation/display time so an older
+    saved fit cannot bypass a new policy merely because its status says ok.
+    PRM, gas and packet definitions are unchanged by this track-only policy.
+    """
     value, error = entry.get('lifetime_us'), entry.get('error_us')
+    if entry.get('method', 'track') in ('track', 'track_pool') and value is not None:
+        candidate = entry.get('fit_diagnostics', {}).get('candidate_parameters', {}).get('lifetime_us', value)
+        if candidate is not None and candidate > TRACK_MAX_LIFETIME_US:
+            return False
     return (entry.get('fit_status', 'ok') == 'ok' and value is not None
             and np.isfinite(value) and value > 0
             and (error is None or (np.isfinite(error) and error >= 0)))
@@ -351,8 +380,11 @@ def aggregate_track_lifetimes(entries, timezone_name='America/Chicago'):
             continue
         stamp = aware_time(row['timestamp']).tz_convert(timezone_name)
         start = (stamp.tz_localize(None).normalize() + pd.Timedelta(hours=6*(stamp.hour//6))).tz_localize(timezone_name)
-        groups[(row.get('sample', 'mixed'), start)].append(row)
-    for (sample, start), members in sorted(groups.items()):
+        # Averaging unlike reconstruction configurations would hide a detector
+        # or selection change just as surely as pooling their segments would.
+        groups[(row.get('sample', 'mixed'), row.get('cohort', ''),
+                row.get('configuration_id', ''), start)].append(row)
+    for (sample, cohort, configuration, start), members in sorted(groups.items()):
         end = (start.tz_localize(None)+pd.Timedelta(hours=6)).tz_localize(timezone_name)
         # A deliberate noise study can have a perfectly finite fit. Keep its
         # scientific result in history while excluding it from routine means
@@ -370,6 +402,7 @@ def aggregate_track_lifetimes(entries, timezone_name='America/Chicago'):
         output.append(dict(timestamp=(start+(end-start)/2).isoformat(),
             period_start=start.isoformat(), period_end=end.isoformat(),
             sample=sample, method='track', aggregation='arithmetic mean of per-file lifetimes, six-hour local windows',
+            cohort=cohort, configuration_id=configuration,
             lifetime_us=float(values.mean()) if n else None,
             error_us=max(available_errors) if available_errors else None,
             propagated_fit_error_us=propagated, between_file_sem_us=scatter_sem,
@@ -382,6 +415,8 @@ def aggregate_track_lifetimes(entries, timezone_name='America/Chicago'):
             members=[dict(timestamp=r['timestamp'], input_file=r.get('input_file') or r.get('published_input_basename'),
                           published_plot_url=r.get('published_plot_url'), run_context=r.get('run_context'),
                           fit_status=r.get('fit_status', 'ok'), lifetime_us=r.get('lifetime_us'),
+                          fit_quality=r.get('fit_quality'),
+                          chi2_ndf=r.get('fit_diagnostics', {}).get('chi2_ndf'),
                           monitoring_excluded=r.get('monitoring_excluded', False),
                           monitoring_review_reason=r.get('monitoring_review_reason'),
                           error_us=r.get('error_us')) for r in members]))
@@ -587,6 +622,8 @@ def overlay_groups(entries, raw_points=False, raw_prm_measurements=None, timezon
             for mean in group['means']:
                 mean = dict(mean)
                 points = [r for r in group['points'] if valid_lifetime(r) and not r.get('monitoring_excluded')
+                          and (sample == 'prm' or (r.get('cohort', '') == mean.get('cohort', '')
+                              and r.get('configuration_id', '') == mean.get('configuration_id', '')))
                           and aware_time(mean['period_start']) <= aware_time(r['timestamp']) < aware_time(mean['period_end'])]
                 if points:
                     seconds = [aware_time(r['timestamp']).timestamp() for r in points]
@@ -724,6 +761,10 @@ def draw_overlay(entries, output_file, timezone_name='America/Chicago', annotati
                    f"{row.get('period_start', '')} — {row.get('period_end', '')}<br>"
                    f"{escape(str(row.get('input_file', '')))}<br>{escape(str(row.get('run_context', '')))}<br>"
                    f"{escape(str(row.get('monitoring_review_reason', '')))}" for row in rows]
+        if sample in TRACK_SAMPLE_DESCRIPTIONS:
+            details = [detail + '<br>χ²/ndf: ' + str(row.get('fit_diagnostics', {}).get('chi2_ndf', 'see individual members'))
+                       + '<br>Numerical/range acceptance only; model agreement is not an acceptance cut.'
+                       for detail, row in zip(details, rows)]
         if sample == 'packet':
             details = [detail + f"<br>{escape(source)}<br>Files: {row.get('n_files','?')}; "
                        f"objects: {row.get('n_objects','?')}<br>Minimum pedestal coverage: "

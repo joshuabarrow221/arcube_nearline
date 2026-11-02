@@ -167,6 +167,9 @@ def pool_tracks(directory, output, hours=6, timezone='America/Chicago'):
     Caller holds the monitor's serialization lock while reading descriptors,
     fitting and publishing. Array hashes are checked even when a fit is cached.
     Thus retries cannot multiply weights or resurrect a retired configuration.
+    The fingerprint includes the estimator and acceptance-policy source files:
+    changing active-bin handling or the lifetime ceiling refits existing pools
+    even when their measured inputs and calendar membership are unchanged.
     """
     directory, output = Path(directory), Path(output)
     output.mkdir(parents=True, exist_ok=True)

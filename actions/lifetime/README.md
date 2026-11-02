@@ -42,6 +42,10 @@ limit does not exclude a PRM reading from its daily mean or reject a fit.
 Error bars show conditional track/packet fit uncertainties or PRM standard errors
 of the mean (SEM). Gas uncertainties are not estimated. These bars exclude shared
 calibration and selection systematics; an absent bar does not mean zero error.
+Track estimates **greater than 20,000 µs are rejected**, independently of the
+plot's display range. Candidate values remain in diagnostics. A point below
+this ceiling has passed numerical/range checks, not a complete physical
+validation; inspect its attenuation chi-square and drift-bin diagnostics.
 
 ## Track selections and trigger categories
 
@@ -104,8 +108,9 @@ steps as described in the [operator guide](../../docs/lifetime-integration.md#sl
 
 The action reads source files without modifying them, stores reusable selected
 segments/charge objects, and refits compatible six-hour pools when membership
-changes. It never averages failed per-file fits or imports measurements from a
-published plot. PRM readings are deduplicated before averaging. Gas quality checks
+or fitting/acceptance code changes. It never averages failed per-file fits or
+imports measurements from a published plot. PRM readings are deduplicated before
+averaging. Gas quality checks
 reject sustained exactly flat readings (with configurable tolerance), inadequate
 coverage and configured calibration limits. A nearly flat noisy analyzer can
 pass the default zero-tolerance check; this does not validate its calibration.
@@ -122,6 +127,15 @@ Track fits with a degenerate attenuation covariance also remain failures, even
 if the optimizer returns a finite number. Their candidate parameters are kept
 in diagnostics; a nominally enormous lifetime with a spurious zero error is not
 promoted to a monitoring point.
+Only drift slices used by the attenuation model are fitted; a bad or empty
+excluded slice cannot abort a track estimate. At least ten of the fourteen
+nominal attenuation slices must yield usable peak estimates; unsupported or
+failed slices are recorded rather than filled with guesses. The 20,000-µs
+ceiling applies to both individual and pooled track results. Default pools
+still include all compatible measured segments, including files that could not
+pass individually.
+An average of passing individual lifetimes or a pool restricted to passing
+files is a different, conditional study, as described in the methods reference.
 The last complete web generation survives a publication failure. See the
 [operator guide](../../docs/lifetime-integration.md#recovery-and-maintenance) for
 retries, permissions and rollback.

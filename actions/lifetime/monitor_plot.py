@@ -117,6 +117,9 @@ def render(payload, directory, config):
             hover.append(escape(str(r.get('source','')))+'<br>'+escape(str(r.get('period_start','')))+' — '+escape(str(r.get('period_end','')))+
                 '<br>Files: '+str(r.get('n_files','—'))+'; observations: '+escape(str(r.get('n_segments',r.get('n_objects',r.get('n_measurements','—')))))+
                 '<br>'+escape(str(r.get('uncertainty','')))+'<br>'+escape(str(r.get('fit_message','')))+
+                ('<br>χ²/ndf: '+escape(str(r.get('fit_diagnostics',{}).get('chi2_ndf','unavailable')))+
+                 '<br>Numerical/range acceptance only; model agreement is not an acceptance cut.'
+                 if sample in TRACK_SAMPLE_DESCRIPTIONS else '')+
                 ('<br>'+escape(TRACK_SAMPLE_DESCRIPTIONS[sample]) if sample in TRACK_SAMPLE_DESCRIPTIONS else ''))
         interactive.add_trace(go.Scatter(x=[t.isoformat() for t in times],y=values,mode='lines+markers',
             name=name,legendgroup=name,showlegend=not any(t.name==name for t in interactive.data),
@@ -172,6 +175,9 @@ def render(payload, directory, config):
     # money plot. Escape every source string; file metadata is untrusted text.
     body='<h1>Lifetime diagnostics</h1><p>Generated '+escape(payload['generated_at'])+'</p>'
     body+='<p>Means/pools do not imply continuous exposure. Trigger timing does not prove beam origin. Gas conversion and packet selection remain provisional.</p>'
+    body+='<p>Tracks require at least ten usable drift bins and a lifetime no greater than 20,000 µs. '
+    body+='Numerical acceptance does not establish model agreement: inspect χ²/ndf and the fitted drift-bin values. '
+    body+='No automatic goodness-of-fit threshold is applied. Rejected candidates remain in the full status JSON.</p>'
     # Put the full definition beside diagnostic results, keeping the main PNG
     # uncluttered. These descriptions explain existing selections; they never
     # change pool membership, fit acceptance, numerical values or error bars.

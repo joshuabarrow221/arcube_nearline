@@ -5,6 +5,32 @@ handoff for a new Codex session on NERSC. It supplements the concise
 [operator guide](lifetime-integration.md), [methods](lifetime-methods.md), and
 [shifter README](../actions/lifetime/README.md); it is not the shifter landing page.
 
+## Track-estimator update prepared 2 November 2026
+
+The current source skips the historical unused drift slices entirely and
+requires at least ten usable bins within the nominal attenuation range
+(standard indices 4–17). Each usable bin retains the existing five-segment,
+histogram-support and finite peak/positive-uncertainty checks. Failed bins are
+recorded before the attenuation fit; no residual or target lifetime controls
+their removal. Degrees of freedom are the number of usable bins minus two.
+
+Both individual and pooled track results above **20,000 µs** are rejected using
+the unrounded estimate, with null accepted lifetime/error and retained candidate
+diagnostics. This ceiling does not alter PRM, gas or packet eligibility. Cached
+track pools include estimator and acceptance code hashes and therefore refit
+after this update. Numerical acceptance still does not validate the attenuation
+model: inspect χ²/ndf, drift-bin measurements and conditional error definitions.
+There is no additional automatic goodness-of-fit cut.
+
+Per-file six-hour means now preserve cohort/configuration boundaries as well
+as sample identity. Ordinary all-input pools and pools restricted to individually
+passing files are different estimators; the latter are a selection-conditioned
+study, not the default watcher behavior. See the current
+[methods reference](lifetime-methods.md) for membership and uncertainty rules.
+The dated measurements and validation examples below remain historical context;
+they are not new outputs from this revision. Check the actual branch commit and
+local diff before assuming these prepared changes have been pushed or deployed.
+
 ## 1. Objective and current deployment status
 
 Integrate direct FLOW track fits, detector-wide native-packet fits, daily PRM

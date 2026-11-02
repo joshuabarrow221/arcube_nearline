@@ -27,12 +27,18 @@ also agree. Explicit `cohort_rules` can merge independently verified compatible
 runs; ambiguous matches fail. `diagnostic_patterns` keeps named hardware/noise
 studies in diagnostics. No file is removed because its fitted lifetime is high
 or low, and per-file fit success is not a membership requirement.
+The track-result acceptance ceiling described below rejects an estimate, not
+the measured segments that can contribute to an ordinary compatible pool.
 
 Source FLOW/native files remain read-only. Compact array objects are immutable
 and hash-checked; each input has one active descriptor, with old objects and fits
 retained for audit. Source identity includes the full relative path. Stored
 history records membership, configuration, selection provenance and failure
 reasons. Plot PNG/JSON from another publication is never a measurement input.
+Pool caches fingerprint the contents of `track_shards.py`, `lifetime.py`, and
+`lifetime_funcs.py` as well as inputs and grouping policy. Updating the
+estimator or lifetime acceptance policy therefore refits unchanged source
+membership; an old cached acceptance decision is not silently reused.
 
 ## Tracks
 
@@ -66,11 +72,31 @@ refitted from the union, not averaged from the two subset lifetimes. Different
 subset statistics/drift coverage can change the result or prevent a fit.
 
 DeMario's estimator in [lifetime_funcs.py](../actions/lifetime/lifetime_funcs.py)
-uses 19 drift slices over 0–1960 ticks at 0.1 µs/tick. Every slice needs at least
-five valid segments and nonempty fixed charge/hit-density histograms. The
-convolved proxy peak uses its historical fit window, and attenuation uses the
-historical subset of drift slices. Missing early support or a failed peak model
-remains a failure even if later slices are populated.
+defines 19 drift slices over 0–1960 ticks at 0.1 µs/tick and fits only the
+fourteen historical attenuation slices, indices **4–17**. Excluded slices 0–3
+and 18 are not fitted or subjected to the peak-support check. Their segment
+counts and time centers remain in diagnostics, with null MPVs and errors.
+An empty or pathological excluded slice cannot abort an otherwise usable fit.
+
+At least **ten of those fourteen nominal slices** must produce usable peak
+estimates. Each usable slice needs at least five valid segments, nonempty fixed
+charge/hit-density histograms, a successful peak fit, and a finite MPV with a
+finite positive uncertainty. Unsupported slices, peak-fit exceptions and
+invalid peak uncertainties are skipped with their reasons retained in diagnostics;
+no initial-guess fallback is substituted. If fewer than ten slices survive, the
+track result fails. These decisions precede attenuation and do not depend on
+its residuals, lifetime, or agreement with another purity method.
+
+The convolved proxy peak keeps its historical 0.5–1.5-times-peak fit window.
+The nominal drift interval does not expand, and usable slices are not dropped
+to improve chi-square. The attenuation fit uses all surviving slices with
+`ndf = number_of_usable_slices - 2`. The amplitude initial guess is the maximum
+MPV among those surviving slices; the lifetime initial guess remains 2000 µs.
+This removes the old dependence of
+initialization on peaks that did not enter attenuation. It can change numerical
+results, especially unstable fits, and is recorded in diagnostics together with
+the estimator version. No charge calibration, track selection, histogram edge,
+or attenuation model is changed by this correction.
 
 Each slice MPV error comes from the covariance of an unweighted SciPy
 `curve_fit`, including its residual scaling. The exponential attenuation fit
@@ -92,6 +118,55 @@ In particular, a flat/rising proxy curve can drive the positive-decay fit toward
 infinite lifetime. The bounded solver's pseudoinverse covariance can then give
 a tiny spurious variance, which legacy integer rounding displays as zero error.
 See [SciPy's covariance documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.curve_fit.html).
+
+Individual and pooled track estimates must also satisfy **tau ≤20,000 µs**.
+This is a prospective monitoring acceptance ceiling, not the plot's axis limit
+or an upper bound supplied to the optimizer. An over-ceiling attempt is not
+clipped to 20,000 µs: its accepted lifetime/error are null, and the candidate
+parameters, uncertainty and rejection reason remain inspectable. The threshold
+is applied to the unrounded result; exactly 20,000 µs is allowed. It does not
+alter PRM, gas or packet eligibility.
+JSON marks these attempts `fit_status="rejected"` and
+`fit_quality="above_lifetime_limit"`, retaining `candidate_lifetime_us`,
+`candidate_error_us` and `fit_diagnostics`. Aggregation/display reapplies the
+ceiling to older track records as well, rather than trusting an old `ok` label.
+
+Numerical acceptance and this ceiling do not establish goodness of fit.
+Attenuation chi-square, degrees of freedom and drift-bin measurements remain
+available; there is no new automatic chi-square cut. A small formal covariance
+error can coexist with a very poor exponential description. Such a value must
+not be interpreted as a validated precision measurement merely because the
+numerical/range policy accepts it.
+
+### Comparing per-file means with pooled estimates
+
+Keep three distinct quantities separate when reviewing track monitoring:
+
+| Quantity | Inputs and interpretation | Reported uncertainty |
+|---|---|---|
+| Mean of passing individual fits | Equal weight per accepted file lifetime within the time window; a summary of fitted values | Larger of propagated fit error and between-file SEM |
+| Ordinary pooled fit | Concatenated measured segments from every compatible input file, regardless of individual fit outcome; the configured monitor's default | Covariance of the new joint attenuation fit |
+| Pool of individually passing files | Concatenated measured segments only from files passing the individual checks for the same sample | Covariance of the new joint fit, conditional on that selection |
+
+For an arithmetic mean of N passing file estimates, propagated error is
+`sqrt(sum(sigma_i**2))/N`; the observed scatter term is
+`sample_SD(tau_i)/sqrt(N)` for N>1. The larger available term is used. A singleton
+retains its fit error rather than acquiring an invented scatter estimate.
+Neither term covers shared calibration/model errors or selection effects.
+
+For either pool, observations are combined **before** histogramming and fitting;
+no additional division of the joint-fit uncertainty by sqrt(number of files)
+is performed. Cohort, recorded reconstruction/selection settings, sample and
+calendar boundaries remain separate. An accepted-file comparison must select
+membership separately for each sample: passing All tracks does not establish
+that its cosmic-enriched subset also passes.
+
+Both the mean and accepted-file pool are conditional on the ability of each
+file to pass. They can omit sparse files that would contribute useful data to
+the ordinary pool, and can introduce selection bias. They are diagnostics, not
+interchangeable estimators or independent corroborating measurements. Preserve
+their member lists and failed attempts instead of relabeling them as the
+ordinary all-input monitoring pool.
 
 ## Packets
 

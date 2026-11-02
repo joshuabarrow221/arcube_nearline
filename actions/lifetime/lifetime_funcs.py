@@ -12,12 +12,27 @@ import matplotlib.pyplot as plt
 import warnings
 
 
-class InvalidAttenuationCovariance(ValueError):
+# Record the estimator behavior separately from input reconstruction metadata.
+# Pooled-result caches already hash this file, so changing this implementation
+# invalidates old fits without changing the identity of measured FLOW arrays.
+TRACK_ESTIMATOR_VERSION = 'demario-proxy-active-bins-v3-min10'
+MIN_USABLE_DRIFT_BINS = 10
+
+
+class TrackFitError(ValueError):
+    """Retain pre-fit/fit evidence without publishing an accepted lifetime."""
+
+    def __init__(self, message, diagnostics, fit_quality='fit_failed'):
+        super().__init__(message)
+        self.fit_diagnostics = diagnostics
+        self.fit_quality = fit_quality
+
+
+class InvalidAttenuationCovariance(TrackFitError):
     """Keep the numerical attempt inspectable without publishing a lifetime."""
 
     def __init__(self, message, diagnostics):
-        super().__init__(message)
-        self.fit_diagnostics = diagnostics
+        super().__init__(message, diagnostics, 'invalid_attenuation_covariance')
 
 
 def attenuation_covariance_diagnostics(covariance):
@@ -151,7 +166,10 @@ def langau_fit(hist, bin_centers):
 
     except RuntimeError as e:
         print(f'Fitting failed: {e}')
-        raise ValueError("Landau-Gaussian slice fit did not converge") from e
+        # PyLandau can raise an MPV evaluation error as well as scipy reporting
+        # optimizer exhaustion. Preserve the actual cause instead of labeling
+        # every RuntimeError as nonconvergence or substituting guessed peaks.
+        raise ValueError(f"Landau-Gaussian slice fit failed: {e}") from e
 
 
     return mpv, eta, sigma, A, mpv_uncertainty, mpv_guess
@@ -161,40 +179,55 @@ def langau_lifetime(nhits, dqdx, time_drifted, time_bins, dqdx_bins, nhits_bins,
     """Fit proxy MPV attenuation in drift time, returning tau/error in µs.
 
     Inputs nhits and dqdx are already divided by segment length. Drift input
-    and time-bin edges are in 0.1-µs ticks. Keep the historical early-bin and
-    final-bin exclusions identical in the fit and its diagnostic plot.
+    and time-bin edges are in 0.1-µs ticks. Only the historically included
+    attenuation slices are fitted: with the standard 19 bins these are 4–17.
+    Excluded slices still have time/count diagnostics, but their MPVs/errors
+    are null. An empty or pathological unused slice cannot veto this fit or
+    influence its initial amplitude. Nominally included slices are usable only
+    after the existing support/peak/finite-error checks. At least ten usable
+    slices are required. A failed slice is recorded and omitted before the
+    attenuation fit; neither its residual nor the resulting lifetime selects
+    which bins survive. The attenuation covariance requirement is unchanged.
     """
 
-    method = " [PyLandau (Landau * Gaussian)]"
+    time_bins = np.asarray(time_bins)
     fit_points = sum(time_bins <= np.max(time_bins)*.1) + 2
-    
-    mpvs = np.empty(len(time_bins)-1)
-    times =  np.empty(len(time_bins)-1)
+    times = (time_bins[:-1] + time_bins[1:]) / 20  # midpoint, then ticks → µs
+    nominal = np.zeros(len(times), dtype=bool)
+    nominal[fit_points:-1] = True
+    fitted = np.zeros(len(times), dtype=bool)
 
-    mpv_uncertainties =  np.empty(len(time_bins)-1)
+    # Preserve the original indexing for downstream diagnostics. NaN is only
+    # an internal placeholder; finite_diagnostic converts it to strict-JSON
+    # null below. Uncomputed excluded peaks must never appear as measurements.
+    mpvs = np.full(len(times), np.nan)
+    mpv_uncertainties = np.full(len(times), np.nan)
+    masks = [(time_drifted >= start) & (time_drifted <= end)
+             for start, end in zip(time_bins[:-1], time_bins[1:])]
+    slice_status = [dict(bin=int(i), n_segments=int(mask.sum()),
+                         status='pending' if nominal[i] else 'excluded',
+                         reason=None if nominal[i] else 'outside nominal attenuation range')
+                    for i, mask in enumerate(masks)]
 
-    masks = []
-    convs = []
-    edges = []
-
-    for i in range(len(time_bins)-1):
-
-        mask = (time_drifted >= time_bins[i]) & (time_drifted <= time_bins[i+1])
-        masks.append(mask)
+    # This loop deliberately cannot call a peak fitter for an excluded slice.
+    # Computing all peaks and discarding some afterward allowed an unused
+    # bin's empty/one-center histogram to abort otherwise testable data.
+    for i in np.flatnonzero(nominal):
+        mask = masks[i]
         dq_dx = dqdx[mask]
+        status = slice_status[i]
         
         hits = nhits[mask]
         if len(hits) < 5 or not np.any((hits >= nhits_bins[0]) & (hits <= nhits_bins[-1])) or not np.any((dq_dx >= dqdx_bins[0]) & (dq_dx <= dqdx_bins[-1])):
-            raise ValueError(f"Insufficient histogram support in drift bin {i}")
+            status.update(status='insufficient_histogram_support',
+                          reason='fewer than five segments or no support on a histogram axis')
+            continue
 
         hist_a, edges_a = np.histogram(hits, bins=nhits_bins, density=True)
         hist_b, edges_b = np.histogram(dq_dx, bins=dqdx_bins, density=True)      
         conv, new_edges = convolution(hist_a,  edges_a, hist_b, edges_b)
         conv_bin_centers = (new_edges[:-1] + new_edges[1:])/2
         
-        convs.append(conv)
-        edges.append(new_edges)
-
         max_value = conv_bin_centers[np.argmax(conv)]
         
         # Historical fit window is 0.5--1.5 times the peak's x coordinate.
@@ -206,43 +239,85 @@ def langau_lifetime(nhits, dqdx, time_drifted, time_bins, dqdx_bins, nhits_bins,
         
         bin_centers_fit = conv_bin_centers[mask_fit_range]
         h_fit = conv[mask_fit_range]
+        status['fit_histogram_centers'] = int(len(bin_centers_fit))
 
-        mpv, eta, sigma, A, mpv_uncertainty, mpv_guess = langau_fit(h_fit, bin_centers_fit)
+        try:
+            mpv, eta, sigma, A, mpv_uncertainty, mpv_guess = langau_fit(h_fit, bin_centers_fit)
+        except (ValueError, RuntimeError, FloatingPointError) as exc:
+            # Retain a failed included slice without guessing its peak or
+            # uncertainty. Eligibility is decided before attenuation fitting,
+            # so this cannot remove a bin for disagreeing with a desired tau.
+            status.update(status='peak_fit_failed', reason=f'{type(exc).__name__}: {exc}')
+            if exc.__cause__ is not None:
+                status['inner_exception'] = f'{type(exc.__cause__).__name__}: {exc.__cause__}'
+            continue
+
+        if not np.isfinite(mpv) or not np.isfinite(mpv_uncertainty) or mpv_uncertainty <= 0:
+            # The full-index MPV/error arrays remain null for an unusable peak.
+            # Finite candidate values are still available in its audit record.
+            status.update(status='invalid_peak_or_uncertainty',
+                          reason='MPV must be finite and its uncertainty finite and positive',
+                          candidate_mpv=finite_diagnostic(mpv),
+                          candidate_mpv_error=finite_diagnostic(mpv_uncertainty))
+            continue
 
         mpvs[i] = mpv
-        times[i] = (time_bins[i]+time_bins[i+1])/20  # midpoint (/2), then ticks → µs (/10)
         mpv_uncertainties[i] = mpv_uncertainty
+        fitted[i] = True
+        status.update(status='usable', reason=None)
 
-    #Get Electron Lifetime
-    if not np.all(np.isfinite(mpvs[fit_points:-1])) or not np.all(np.isfinite(mpv_uncertainties[fit_points:-1])) or np.any(mpv_uncertainties[fit_points:-1] <= 0):
-        raise ValueError("Invalid drift-bin MPV uncertainty")
-    params, cov = curve_fit(ElectronLifetimeFunc, times[fit_points:-1], mpvs[fit_points:-1], bounds = ([0, .0,], [np.inf, np.inf]), 
-                            p0 = [np.max(mpvs), 2000], sigma=mpv_uncertainties[fit_points:-1], absolute_sigma=True)
+    # Preserve coverage evidence even when too few bins survive to attempt a
+    # lifetime fit. All entries are JSON-safe, including nonfinite candidates.
+    diagnostics = dict(estimator_version=TRACK_ESTIMATOR_VERSION,
+        nominal_fitted_bins=np.flatnonzero(nominal).tolist(),
+        fitted_bins=np.flatnonzero(fitted).tolist(),
+        minimum_usable_drift_bins=MIN_USABLE_DRIFT_BINS,
+        usable_drift_bin_count=int(fitted.sum()),
+        excluded_bins=np.flatnonzero(~nominal).tolist(),
+        excluded_bin_policy='not peak-fitted; MPV/error null; counts and time centers retained',
+        bin_selection_policy='pre-attenuation support and peak validity only; no residual or lifetime selection',
+        skipped_bins=[row for row in slice_status if row['status'] not in ('usable', 'excluded')],
+        drift_bin_status=slice_status,
+        drift_time_us=times.tolist(), mpv=[finite_diagnostic(v) for v in mpvs],
+        mpv_error=[finite_diagnostic(v) for v in mpv_uncertainties],
+        segments_per_bin=[int(m.sum()) for m in masks],
+        uncertainty='weighted attenuation covariance; proxy MPV errors from unweighted slice-fit covariance')
+    if fitted.sum() < MIN_USABLE_DRIFT_BINS:
+        raise TrackFitError(
+            f'Insufficient usable drift bins: {int(fitted.sum())}; require at least {MIN_USABLE_DRIFT_BINS}',
+            diagnostics, 'insufficient_usable_drift_bins')
+
+    # Initialization is now determined only by measurements actually fitted.
+    # The lifetime initial guess, positive model bounds and absolute-sigma
+    # weighting are unchanged. This amplitude change is recorded explicitly.
+    initial_guess = [float(np.max(mpvs[fitted])), 2000]
+    diagnostics['attenuation_initial_guess'] = initial_guess
+    try:
+        params, cov = curve_fit(ElectronLifetimeFunc, times[fitted], mpvs[fitted],
+                                bounds=([0, 0.], [np.inf, np.inf]), p0=initial_guess,
+                                sigma=mpv_uncertainties[fitted], absolute_sigma=True)
+    except (ValueError, RuntimeError, FloatingPointError) as exc:
+        raise TrackFitError(f'Attenuation fit failed: {exc}', diagnostics,
+                            'attenuation_fit_failed') from exc
 
     # Report goodness-of-fit on exactly the fitted bins. The previous legend
     # accidentally counted the final (excluded) bin and did not subtract the
     # two fitted parameters. This correction changes diagnostics, not tau.
-    fitted = np.zeros(len(times), dtype=bool)
-    fitted[fit_points:-1] = True
     chi2 = chi_squared1(params, ElectronLifetimeFunc, times[fitted], mpvs[fitted], mpv_uncertainties[fitted])
     ndf = int(fitted.sum()) - len(params)
-    x_fit = np.linspace(times[0], times[-1],1000)
+    x_fit = np.linspace(times[fitted][0], times[fitted][-1], 1000)
     fit_curve = ElectronLifetimeFunc(x_fit, *params)
     
     # Validate before rounding the legacy public error or creating a plot. A
     # genuine sub-microsecond uncertainty may round to zero and is not rejected;
     # a rank-deficient covariance must not masquerade as tau +/- zero instead.
     check = attenuation_covariance_diagnostics(cov)
-    diagnostics = dict(chi2=finite_diagnostic(chi2), ndf=ndf, chi2_ndf=finite_diagnostic(chi2/ndf),
-        drift_time_us=times.tolist(), mpv=[finite_diagnostic(v) for v in mpvs],
-        mpv_error=[finite_diagnostic(v) for v in mpv_uncertainties],
-        fitted_bins=np.flatnonzero(fitted).tolist(), segments_per_bin=[int(m.sum()) for m in masks],
+    diagnostics.update(chi2=finite_diagnostic(chi2), ndf=ndf, chi2_ndf=finite_diagnostic(chi2/ndf),
         candidate_parameters=dict(amplitude=finite_diagnostic(params[0]), lifetime_us=finite_diagnostic(params[1])),
         candidate_error_us_unrounded=(finite_diagnostic(np.sqrt(cov[1, 1]))
             if cov.shape == (2, 2) and np.isfinite(cov[1, 1]) and cov[1, 1] >= 0 else None),
         attenuation_covariance=[[finite_diagnostic(value) for value in row] for row in cov],
-        attenuation_covariance_check=check,
-        uncertainty='weighted attenuation covariance; proxy MPV errors from unweighted slice-fit covariance')
+        attenuation_covariance_check=check)
     if not check['valid']:
         # The caller records this attempted fit with null accepted lifetime and
         # error. No diagnostic figure is saved that could imply a credible tau.
@@ -253,14 +328,10 @@ def langau_lifetime(nhits, dqdx, time_drifted, time_bins, dqdx_bins, nhits_bins,
     # value return signature used by the older lifetime entry points.
     fig.lifetime_diagnostics = diagnostics
 
-    #Set y lim
-    ax.set_ylim(min(mpvs)-2,max(mpvs)+2) 
-
-    #Plot
+    # Excluded slices have no fitted MPVs and must not be displayed as gray
+    # measurements. Autoscaling includes full uncertainties of included peaks.
     ax.scatter(times[fitted], mpvs[fitted],
                marker=r"$\circ$", color='black', label='Fitted')
-    ax.scatter(times[~fitted], mpvs[~fitted],
-               marker=r"$\circ$", color='grey', label='Not Fitted')
     ax.plot(x_fit, fit_curve, color='orange',label=f'$e^{{-}}$ lifetime = {params[1]:.4f} $\\pm$ {np.sqrt(cov[1,1]):.4f} [μs] \n $dQ_{{0}}/dx$ \
             = {params[0]:.4} $\\pm$ {np.sqrt(cov[0,0]):.4f} [proxy units] \n $\\chi^{2}/ndf = {chi2/ndf:.2f}$')
     
@@ -272,9 +343,6 @@ def langau_lifetime(nhits, dqdx, time_drifted, time_bins, dqdx_bins, nhits_bins,
     # Add error bars using matplotlib
     ax.errorbar(x=times[fitted], y=mpvs[fitted], yerr=mpv_uncertainties[fitted],
                 fmt='none', ecolor='black', elinewidth=1, capsize=3, zorder=2)
-    ax.errorbar(x=times[~fitted], y=mpvs[~fitted], yerr=mpv_uncertainties[~fitted],
-                fmt='none', ecolor='grey', elinewidth=1, capsize=3, zorder=2)
-
     ax.legend(edgecolor='black',  fontsize= 8, loc='upper right')
 
     ax.grid(axis='both', linestyle='--')
