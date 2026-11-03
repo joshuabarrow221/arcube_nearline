@@ -76,9 +76,23 @@ out-of-volume hits remain available when evaluating electronics activity, so
 trimming a long noise streak to the detector volume cannot hide its repeated
 firing. Nonfinite required coordinates or arrival times fail hit quality.
 
-When FLOW records `rollover_ticks`, event-local timestamps are unwrapped by
-cutting at the largest circular gap. The event must fit within half a rollover
-period. Without that metadata, no rollover is inferred. Source clock and drift
+When FLOW records `rollover_ticks`, timestamps are unwrapped **separately for
+each io_group**, cutting at the largest circular gap. Each group's interval
+must fit within half a rollover period. A group that cannot satisfy this
+condition has ambiguous arrival timing: its hits and associated segments are
+vetoed, with `ambiguous_clock_hits`, `ambiguous_clock_groups`, and `clock_domains`
+recorded in the event diagnostics. Other evaluable groups and events continue;
+one ambiguous event does not invalidate the entire file. This timing veto is
+recorded separately from detected hot-pixel or coherent noise.
+
+The io_group is the clock domain used by FLOW's timestamp correction and SYNC
+unrolling. Combining independent groups into one short event interval can fail
+even when each group is compact. Sustained activity can also produce genuinely
+broad events within a group. Compact PPS phases alone do not establish the
+absolute epoch of hits in a multi-second event; recovering ambiguous groups
+would require packet/SYNC information beyond the prompt-hit phase field.
+
+Without rollover metadata, no rollover is inferred. Source clock and drift
 axis metadata take precedence over conflicting CLI overrides.
 
 ## Default cuts
@@ -115,7 +129,12 @@ activity across multiple smaller regions:
 | --- | ---: | ---: | --- |
 | Chip | `chip_min_hits = 32` | `chip_min_channels = 24` | One physical chip |
 | Tile | `tile_min_hits = 128` | `tile_min_channels = 96` | `tile_min_chips = 4` |
-| Module | `module_min_hits = 512` | `module_min_channels = 384` | `module_min_tiles = 4` |
+| Module, within one io_group | `module_min_hits = 512` | `module_min_channels = 384` | `module_min_tiles = 4` |
+
+All coincidence tests stay within one io_group. The module test combines its
+tiles on that readout side; it does not sum subthreshold activity across the
+two independently timed io_groups. Independently shifting both clocks to zero
+and then combining them would manufacture simultaneity.
 
 Every coherent-firing test also requires
 `burst_min_transverse_rms_cm = 0.5`: the minor-axis RMS of the distinct pixels'

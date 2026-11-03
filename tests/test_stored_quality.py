@@ -123,6 +123,28 @@ def test_bounds_reject_whole_segment_and_report_separately(tmp_path):
         assert result['quality/events/data']['n_outside_module_hits'].sum() == 1
 
 
+def test_ambiguous_clock_does_not_abort_file_or_reject_other_groups(tmp_path):
+    source, output = tmp_path / 'source.h5', tmp_path / 'selected.h5'
+    original = fixture_flow(source)
+    with h5py.File(source, 'r+') as h:
+        rows = h['charge/calib_prompt_hits/data'][:]
+        rows['ts_pps'][:12] = np.linspace(0, 9_900_000, 12)
+        rows['io_group'][12] = 3  # Clean independent clock in the same event.
+        h['charge/calib_prompt_hits/data'][:] = rows
+        original['io_group'][2] = 3
+        h['analysis/rock_muon_segments/data'][:] = original
+    select_stored_muons(source, output)
+    with h5py.File(output, 'r') as result:
+        assert result.attrs['complete']
+        np.testing.assert_array_equal(result['analysis/beam_rock_muon_segments/data'][:], original[[0]])
+        np.testing.assert_array_equal(result['analysis/cosmic_muon_segments/data'][:], original[[2]])
+        audits = [json.loads(row) for row in result['quality/events/diagnostics'][:]]
+        noisy = next(row for row in audits if row['event_id'] == 42)
+        assert noisy['ambiguous_clock_hits'] == 12
+        assert noisy['ambiguous_clock_groups'] == 1
+        assert noisy['n_kept_hits'] == 1
+
+
 def test_source_clock_conflict_and_source_overwrite_fail(tmp_path):
     source = tmp_path / 'source.h5'
     fixture_flow(source)

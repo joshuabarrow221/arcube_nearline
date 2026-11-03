@@ -204,6 +204,55 @@ def test_no_data_or_bad_input_never_invokes_fitter(monkeypatch, tmp_path):
         recent.main(args + ['--end', '2026-11-03T12:00:00'])
 
 
+def test_nonempty_pool_error_is_reported_and_blocks_fit(monkeypatch, tmp_path, capsys):
+    good = fixture(tmp_path)
+    bad = fixture(tmp_path, '2026_11_03_02_00_00_CST', rows=[(1, 1, 21, 4, 200)])
+    with h5py.File(bad, 'r+') as source:
+        source.attrs['complete'] = False
+    monkeypatch.setattr(recent, 'fit_samples', lambda *a, **k: pytest.fail('partial-input fitter must not run'))
+    output = tmp_path/'results'
+    assert recent.main([str(good), str(bad), '--selection', 'stored',
+                        '--end', '2026-11-03T12:00:00Z', '--output', str(output)]) == 2
+    terminal = capsys.readouterr()
+    receipt = json.loads(next(output.glob('*/summary.json')).read_text())
+    assert receipt['n_files'] == 1 and receipt['n_valid_segments'] == 1
+    assert receipt['fit_status'] == 'unavailable' and receipt['lifetime_us'] is None
+    assert receipt['errors'] == [dict(path=str(bad.resolve()),
+                                    error='ValueError: incomplete selected-segment input')]
+    assert str(bad.resolve()) in terminal.err
+    assert 'ValueError: incomplete selected-segment input' in terminal.err
+    assert receipt['fit_message'] in terminal.err
+    assert '1 input error' in terminal.out
+    assert not list(output.glob('*/segments.h5'))
+
+
+def test_failed_selection_sidecar_is_retained_without_reusing_its_path(monkeypatch, tmp_path):
+    paths = [fixture(tmp_path, f'2026_11_03_0{hour}_00_00_CST', rows=[(1, 1, 20+hour, 4, 200)])
+             for hour in (1, 2, 3)]
+    for index, path in enumerate(paths):
+        with h5py.File(path, 'r+') as source:
+            source.create_dataset('charge/calib_prompt_hits/data', data=[0])
+            source[str(Path(LEGACY_SAMPLE[1]).parent)].attrs['selector_version'] = int(index == 1)
+    def select(source_path, output_path, quality_config):
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        with h5py.File(output_path, 'w') as output, h5py.File(source_path, 'r') as source:
+            output.create_dataset(LEGACY_SAMPLE[1], data=source[LEGACY_SAMPLE[1]][:])
+            output.attrs.update(complete=True, quality_code_sha256='quality', tick_period_us=.1)
+    module = ModuleType('stored_quality')
+    module.select_stored_muons = select
+    monkeypatch.setitem(sys.modules, 'stored_quality', module)
+    data, _, receipt = recent.gather_recent(paths, aware_time('2026-11-03T06:00:00Z'),
+        aware_time('2026-11-03T12:00:00Z'), tmp_path)
+    assert len(data) == 2 and len(receipt['errors']) == 1
+    failure = receipt['errors'][0]
+    assert failure['path'] == str(paths[1].resolve())
+    assert Path(failure['selection_file']).name == '00001.segments.h5'
+    assert [Path(member['selection_file']).name for member in receipt['members']] == [
+        '00000.segments.h5', '00002.segments.h5']
+    with h5py.File(failure['selection_file'], 'r') as failed_sidecar:
+        np.testing.assert_array_equal(failed_sidecar[LEGACY_SAMPLE[1]]['dQ'], [22.])
+
+
 def test_quality_stored_is_default_and_requires_hits_before_selection(monkeypatch, tmp_path):
     path = fixture(tmp_path)
     monkeypatch.setattr(recent, 'fit_samples', lambda *a, **k: pytest.fail('fitter must not run'))

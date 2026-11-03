@@ -8,8 +8,9 @@ track cleaning, which could otherwise hide the surrounding noisy electronics.
 Arrival ``ts_pps`` is in charge-clock ticks, independent of reconstructed drift
 time. Callers should supply ``tick_us`` from FLOW ``run_info/crs_ticks``. Calls
 must contain one event: PPS-relative timestamps cannot identify acquisition time
-across unrelated events. Optional rollover unwrapping assumes an event occupies
-less than half a clock period. Noise split across event boundaries is not joined.
+across unrelated events. Rollover handling is independent for each io_group;
+an ambiguous group's hits are rejected without invalidating other groups or
+the entire source file. Noise split across event boundaries is not joined.
 """
 from collections import deque
 from dataclasses import asdict, dataclass
@@ -17,7 +18,11 @@ from dataclasses import asdict, dataclass
 import numpy as np
 
 
-QUALITY_VERSION = 'event-electronics-v1'
+QUALITY_VERSION = 'event-electronics-v2-iogroup-clock'
+
+
+class ArrivalTimeError(ValueError):
+    """A clock group's PPS phases do not determine a short arrival interval."""
 
 
 @dataclass(frozen=True)
@@ -92,20 +97,21 @@ def _groups(labels):
 
 
 def _arrival_times(ticks, config):
+    """Resolve a short interval within one io_group, never across clocks."""
     ticks = ticks.astype('f8', copy=True)
     unwrapped = False
     if len(ticks) and config.rollover_ticks is not None:
         period = config.rollover_ticks
         if np.any((ticks < 0) | (ticks >= period)):
-            raise ValueError('ts_pps lies outside the specified rollover period')
-        if np.ptp(ticks) > period / 2:
+            raise ArrivalTimeError('ts_pps lies outside the specified rollover period')
+        if np.ptp(ticks) >= period / 2:
             ordered = np.sort(np.unique(ticks))
             gaps = np.diff(np.r_[ordered, ordered[0] + period])
             gap = int(np.argmax(gaps))
             start = ordered[(gap + 1) % len(ordered)]
             ticks[ticks < start] += period
             if np.ptp(ticks) >= period / 2:
-                raise ValueError('event does not fit within half the rollover period')
+                raise ArrivalTimeError('io_group does not fit within half the rollover period')
             unwrapped = True
     if len(ticks):
         ticks -= ticks.min()
@@ -233,6 +239,8 @@ def quality_hit_mask(hits, config=None, *, tile_ids=None, module_ids=None):
     module=(io_group-1)//2+1. The tile mapping merges alternate UART routes to
     the same physical channel. It must not be assumed for another detector.
     Invalid required hit fields fail closed; isolated valid hits are retained.
+    An ambiguous PPS interval vetoes only that io_group's hits. All coincidence
+    scopes, including the module test, stay within the same io_group.
     """
     config = TrackQualityConfig() if config is None else config
     if not isinstance(config, TrackQualityConfig):
@@ -263,16 +271,44 @@ def quality_hit_mask(hits, config=None, *, tile_ids=None, module_ids=None):
             raise ValueError(f'{name}_ids must contain integer geometry identities')
         identifiers.append(values[valid].astype('i8'))
         mapping[name] = 'caller-provided geometry' if supplied is not None else '2x2 four UARTs per tile' if name == 'tile' else '2x2 paired io_groups per module'
-    tiles, modules = identifiers
-    selected = hits[valid]
+    # FLOW corrects and unrolls charge clocks per io_group. A long span of
+    # phases across groups does not imply that each group's local timing is
+    # ambiguous. Do not require one short interval for the whole event.
+    candidate = hits[valid]
+    clock_valid = np.ones(len(candidate), dtype=bool)
+    times = np.zeros(len(candidate), dtype='f8')
+    clocks, unwrapped = [], False
+    for indices in _groups(candidate['io_group']):
+        ticks = candidate['ts_pps'][indices]
+        clock = dict(io_group=int(candidate['io_group'][indices[0]]),
+                     n_hits=len(indices), phase_min_ticks=float(ticks.min()),
+                     phase_max_ticks=float(ticks.max()))
+        try:
+            local_times, local_unwrapped = _arrival_times(ticks, config)
+        except ArrivalTimeError as exc:
+            clock_valid[indices] = False
+            clock.update(status='ambiguous', reason=str(exc))
+        else:
+            times[indices] = local_times
+            unwrapped |= local_unwrapped
+            clock.update(status='ok', span_us=float(np.ptp(local_times)),
+                         timestamps_unwrapped=local_unwrapped)
+        clocks.append(clock)
+    eligible = valid.copy()
+    eligible[valid] = clock_valid
+    tiles, modules = (values[clock_valid] for values in identifiers)
+    selected = hits[eligible]
+    times = times[clock_valid]
     xyz = np.column_stack([selected[field] for field in ('x', 'y', 'z')])
-    times, unwrapped = _arrival_times(selected['ts_pps'], config)
     groups = selected['io_group'].astype('i8')
     chips = selected['chip_id'].astype('i8')
     pixels = _labels([groups, tiles, chips, selected['channel_id']])
     chip_groups = _labels([groups, tiles, chips])
     tile_groups = _labels([groups, tiles])
-    module_groups = _labels([modules])
+    # Independent recentering cannot establish cross-io_group coincidence.
+    # Evaluate module breadth within each clock domain, including its tiles,
+    # rather than inventing simultaneity between unrelated PPS phases.
+    module_groups = _labels([modules, groups])
     transverse = [i for i, axis in enumerate(('x', 'y', 'z')) if axis != config.drift_axis]
     # Center the pixel-plane coordinates to avoid cancellation in translated
     # detector coordinates (e.g. z ~1300 cm).
@@ -293,16 +329,20 @@ def quality_hit_mask(hits, config=None, *, tile_ids=None, module_ids=None):
         burst |= mask
         counts[name] = count
         maxima[name] = maximum
-    keep = valid.copy()
-    keep[valid] = ~(hot | burst)
+    keep = eligible.copy()
+    keep[eligible] = ~(hot | burst)
     diagnostics = dict(
         version=QUALITY_VERSION, thresholds_status='provisional; not efficiency-calibrated',
         config=config.to_dict(), input_hits=len(hits), kept_hits=int(keep.sum()),
         rejected_hits=int((~keep).sum()), invalid_hits=int((~valid).sum()),
+        ambiguous_clock_hits=int((~clock_valid).sum()),
+        ambiguous_clock_groups=sum(clock['status'] == 'ambiguous' for clock in clocks),
+        clock_domains=clocks,
         hot_pixel_hits=int(hot.sum()), coherent_noise_hits=int(burst.sum()),
         hot_pixels_flagged=hot_pixels, burst_groups_flagged=counts,
         maximum_distinct_channels= maxima, geometry_mapping=mapping,
         timestamp_field='ts_pps', timestamps_unwrapped=unwrapped,
+        coincidence_scope='within io_group; module breadth evaluated separately for each io_group',
         scope='one event; no cross-event noise history',
     )
     return keep, diagnostics

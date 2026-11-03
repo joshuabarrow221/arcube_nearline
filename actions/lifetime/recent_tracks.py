@@ -15,6 +15,7 @@ import json
 import logging
 from pathlib import Path
 import re
+import sys
 import tempfile
 
 import h5py
@@ -182,8 +183,9 @@ def gather_recent(paths, start, end, directory, selection='quality-stored', data
     arrays, members, skipped, errors = [], [], [], []
     member_rows, dataset_rows, source_rows = [], [], []
     signature, dtype, seen_sources, payloads = None, None, set(), set()
-    for path in paths:
+    for input_index, path in enumerate(paths):
         path = Path(path).resolve()
+        selected_path = None
         try:
             with ExitStack() as stack:
                 source = stack.enter_context(h5py.File(path, 'r'))
@@ -210,7 +212,10 @@ def gather_recent(paths, start, end, directory, selection='quality-stored', data
                         from track_selection import select_muons
                     else:
                         from stored_quality import select_stored_muons as select_muons
-                    selected_path = directory/'selections'/f'{len(members):05d}.segments.h5'
+                    # A completed sidecar can still fail compatibility checks.
+                    # Keep its evidence instead of reusing its name for the
+                    # next successfully gathered source.
+                    selected_path = directory/'selections'/f'{input_index:05d}.segments.h5'
                     select_muons(str(path), str(selected_path), quality_config=quality_config)
                     selected = stack.enter_context(h5py.File(selected_path, 'r'))
                     if not bool(selected.attrs.get('complete', False)):
@@ -267,7 +272,11 @@ def gather_recent(paths, start, end, directory, selection='quality-stored', data
                 signature = current
                 print(f'+{members[-1]["n_raw_segments"]:6d} segments  {path.name}', flush=True)
         except Exception as exc:
-            errors.append(dict(path=str(path), error=f'{type(exc).__name__}: {exc}'))
+            failure = dict(path=str(path), error=f'{type(exc).__name__}: {exc}')
+            if selected_path is not None and selected_path != path and selected_path.exists():
+                failure['selection_file'] = str(selected_path)
+            errors.append(failure)
+            print(f'Input error: {path}: {failure["error"]}', file=sys.stderr, flush=True)
     report = dict(members=members, skipped=skipped, errors=errors, reconstruction_signature=signature,
                   n_files=len(members), n_raw_segments=sum(len(a) for a in arrays),
                   n_valid_segments=0, n_invalid_segments=0)
@@ -357,7 +366,12 @@ def main(argv=None):
                        lifetime_us=result['lifetime_us'], error_us=result['error_us'])
         status = 0 if result['fit_status'] == 'ok' else 2
     atomic_json(directory/'summary.json', receipt)
-    print(f'{receipt["n_files"]} files, {receipt.get("n_valid_segments", 0)} valid segments; fit {receipt["fit_status"]}')
+    message = receipt.get('fit_message') or receipt.get('fit', {}).get('fit_message')
+    if message:
+        print(f'Fit {receipt["fit_status"]}: {message}', file=sys.stderr, flush=True)
+    error_count = len(receipt['errors'])
+    print(f'{receipt["n_files"]} files, {receipt.get("n_valid_segments", 0)} valid segments; '
+          f'fit {receipt["fit_status"]}; {error_count} input error{"" if error_count == 1 else "s"}')
     print(f'Receipt: {directory / "summary.json"}')
     return status
 

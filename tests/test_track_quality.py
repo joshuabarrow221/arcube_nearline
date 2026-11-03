@@ -148,6 +148,66 @@ def test_empty_invalid_and_missing_field_handling():
         quality_hit_mask(np.zeros(1, dtype=[('x', 'f8')]))
 
 
+def test_offset_clock_groups_do_not_require_one_short_global_time_interval():
+    period = 10_000_000
+    data = np.concatenate([hits(10) for _ in range(3)])
+    for group, offset in zip(range(3), [.1, .45, .8]):
+        rows = slice(group*10, (group+1)*10)
+        data['io_group'][rows] = group+1
+        data['ts_pps'][rows] += period*offset
+    keep, diagnostic = quality_hit_mask(data, replace(TrackQualityConfig(), rollover_ticks=period))
+    assert keep.all()
+    assert diagnostic['ambiguous_clock_groups'] == 0
+    assert len(diagnostic['clock_domains']) == 3
+
+
+def test_broad_clock_group_is_vetoed_without_losing_an_independent_group():
+    period = 10_000_000
+    ambiguous, clean = hits(4), hits(10)
+    ambiguous['ts_pps'] = np.array([0, .35, .7, .95])*period
+    clean['io_group'] = 3
+    keep, diagnostic = quality_hit_mask(np.concatenate([ambiguous, clean]),
+                                       replace(TrackQualityConfig(), rollover_ticks=period))
+    assert not keep[:4].any() and keep[4:].all()
+    assert diagnostic['ambiguous_clock_groups'] == 1
+    assert diagnostic['ambiguous_clock_hits'] == 4
+    # Timing ambiguity is not evidence of a particular electronics-noise type.
+    assert diagnostic['hot_pixel_hits'] == diagnostic['coherent_noise_hits'] == 0
+    assert diagnostic['clock_domains'][0]['status'] == 'ambiguous'
+    json.dumps(diagnostic, allow_nan=False)
+
+
+def test_independent_clock_origins_do_not_manufacture_a_module_burst():
+    period = 10_000_000
+    data = hits(32)
+    data['io_group'] = np.repeat([1, 2], 16)
+    data['io_channel'] = np.tile(np.repeat([1, 5], 8), 2)
+    data['ts_pps'][:16] = np.arange(16)
+    data['ts_pps'][16:] = .4*period + np.arange(16)
+    cfg = replace(TrackQualityConfig(), rollover_ticks=period,
+                  chip_min_hits=1000, tile_min_hits=1000,
+                  module_min_hits=16, module_min_channels=24, module_min_tiles=2,
+                  burst_min_transverse_rms_cm=.3)
+    keep, diagnostic = quality_hit_mask(data, cfg)
+    assert keep.all()
+    assert diagnostic['burst_groups_flagged']['module'] == 0
+    assert diagnostic['maximum_distinct_channels']['module'] == 16
+
+
+def test_exact_half_period_is_ambiguous_and_rollover_burst_survives_elsewhere():
+    period = 10_000_000
+    ambiguous, burst = hits(2), hits(64)
+    ambiguous['ts_pps'] = [0, period/2]
+    burst['io_group'] = 3
+    burst['ts_pps'] = (np.arange(64)+period-32) % period
+    keep, diagnostic = quality_hit_mask(np.concatenate([ambiguous, burst]),
+                                       replace(TrackQualityConfig(), rollover_ticks=period))
+    assert not keep.any()
+    assert diagnostic['ambiguous_clock_hits'] == 2
+    assert diagnostic['coherent_noise_hits'] == 64
+    assert diagnostic['timestamps_unwrapped']
+
+
 @pytest.mark.parametrize('kwargs', [dict(window_us=0), dict(tick_us=np.nan),
     dict(hot_min_hits=1), dict(chip_min_channels=1.5), dict(tile_min_chips=True),
     dict(hot_min_axis_cosine=1.01), dict(drift_axis='t'), dict(rollover_ticks=-1)])

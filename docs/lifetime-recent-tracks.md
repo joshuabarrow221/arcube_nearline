@@ -110,6 +110,13 @@ failed fits and rejected estimates produce a JSON receipt with null lifetime
 and process exit status **2**; an accepted fit returns **0**. Argument/discovery
 errors also return a nonzero status. Source FLOW files are never modified.
 
+Input errors print their file and reason immediately, and the final summary
+prints the blocking message and error count. Completed selection sidecars keep
+unique input-index filenames even when a later compatibility check rejects a
+file. A broad or ambiguous PPS interval is handled as a recorded io_group-level
+segment veto, not an input-file error; independently evaluable groups and
+events remain available for the fit.
+
 During fitting, each distinct `pylandau` log message is displayed once at its
 original severity. `summary.json` retains every distinct message and its full
 occurrence count in `fit_warnings`, so repeated optimizer warnings do not flood
