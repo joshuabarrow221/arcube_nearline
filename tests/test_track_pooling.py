@@ -53,12 +53,13 @@ def test_duplicate_source_cannot_acquire_extra_weight(tmp_path):
         build_segment_pool([first,first],tmp_path/'pool.h5')
 
 
-@pytest.mark.parametrize('failure', ['incomplete', 'selector', 'calibration', 'tampered'])
+@pytest.mark.parametrize('failure', ['incomplete', 'selector', 'quality', 'calibration', 'tampered'])
 def test_bad_provenance_cannot_enter_pool(tmp_path, failure):
     first, second = member(tmp_path,'a'), member(tmp_path,'b')
     with h5py.File(second['selection_file'],'r+') as f:
         if failure=='incomplete':f.attrs['complete']=False
         if failure=='selector':f.attrs['selector_sha256']='changed'
+        if failure=='quality':f.attrs['quality_config']='{"window_us": 25}'
         if failure=='tampered':
             path='analysis/cosmic_muon_segments/data';data=f[path][:]
             data['dQ'] *= 2;f[path][:]=data

@@ -75,6 +75,9 @@ def build_segment_pool(members, destination):
                 raise ValueError('selection belongs to another FLOW input')
             current = reconstruction_signature(flow)
             current['selector_sha256'] = str(selected.attrs['selector_sha256'])
+            current['hit_quality'] = {key: json_value(selected.attrs[key]) for key in
+                ('quality_config', 'quality_code_sha256', 'geometry_quality_code_sha256', 'adapter_sha256',
+                 'tick_period_us', 'selection_origin') if key in selected.attrs}
             if signature is not None and current != signature:
                 raise ValueError('incompatible reconstruction or selector metadata')
             signature = current
@@ -96,6 +99,7 @@ def build_segment_pool(members, destination):
     with h5py.File(destination, 'w') as pooled:
         pooled.attrs['pool_members'] = json.dumps(records)
         pooled.attrs['reconstruction_signature'] = json.dumps(signature, sort_keys=True)
+        pooled.attrs.update(signature['hit_quality'])
         pooled.attrs['complete'] = True
         for sample, path in SPLIT_SAMPLES:
             data = np.concatenate(arrays[sample])
@@ -107,12 +111,11 @@ def build_segment_pool(members, destination):
 
 
 def drift_support(segments):
-    """Expose all legacy-bin prerequisites, including bins outside attenuation.
+    """Expose histogram support, including bins outside attenuation.
 
-    The existing fitter first fits all 19 slice histograms, then uses only its
-    historical subset for attenuation. Missing early-bin support still aborts
-    that procedure. This diagnostic follows the same closed interval masks;
-    it never removes a bad bin or changes the fitter's acceptance.
+    Only bins 4–17 enter the current attenuation fit; unsupported excluded bins
+    do not veto it. Histogram support is necessary, not sufficient, for a usable
+    peak. Match the fitter's closed interval masks without changing acceptance.
     """
     segments = valid_segments(segments)
     edges = np.linspace(0, 1960, 20)
@@ -126,5 +129,6 @@ def drift_support(segments):
         rows.append(dict(bin=index, start_us=float(left/10), end_us=float(right/10),
             n_segments=len(chosen), hit_histogram_entries=hit_support,
             charge_histogram_entries=charge_support,
+            nominal_attenuation_bin=bool(4 <= index <= 17),
             histogram_supported=bool(len(chosen) >= 5 and hit_support and charge_support)))
     return rows

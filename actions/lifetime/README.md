@@ -68,6 +68,19 @@ does not establish equal upstream versions or detector conditions.
 
 ## Running the monitor
 
+For an on-demand **trailing six-hour** fit with hit-level hot-pixel and coherent
+electronics-noise checks, use [the recent-track CLI](../../docs/lifetime-recent-tracks.md):
+
+```bash
+python actions/lifetime/recent_tracks.py /data/run/FLOW --output /data/lifetime_studies/recent
+```
+
+Its default checks stored segments through their original event/hit references
+and preserves surviving charge and length. The [quality-cut reference](../../docs/lifetime-track-quality.md)
+describes the provisional thresholds and limitations. The existing watcher's
+stored-segment pools do not automatically acquire these new checks; their
+noise quality remains unverified unless supplied with a separately vetted workflow.
+
 Use Python 3.10+ and [the analysis requirements](requirements.txt). Queued operation
 also needs the existing nearline FireWorks environment. Configure the input,
 state and publication directories using

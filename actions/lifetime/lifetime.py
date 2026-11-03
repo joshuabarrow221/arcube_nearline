@@ -172,6 +172,12 @@ def fit_samples(input_file, output_file_plot, requested_samples=None, timestamp=
                 'track_acceptance_version': TRACK_ACCEPTANCE_VERSION,
                 'maximum_lifetime_us': TRACK_MAX_LIFETIME_US,
             }
+            from track_pooling import json_value
+            result['hit_quality'] = {key: json_value(h5_file.attrs[key]) for key in
+                ('quality_config', 'quality_code_sha256', 'geometry_quality_code_sha256', 'adapter_sha256',
+                 'tick_period_us', 'selection_origin') if key in h5_file.attrs}
+            result['hit_quality_status'] = ('evaluated_provisional_cuts'
+                if 'quality_config' in result['hit_quality'] else 'unverified_stored_segments')
 
             if 'source_flow_url' in h5_file.attrs:
                 result['flow_segment_cache'] = os.path.abspath(input_file)
@@ -1070,6 +1076,9 @@ def main():
     parser.add_argument('--flow-cache', help='Optional persistent segment cache for remote FLOW; default streams into memory')
     parser.add_argument('--reference-history', action='append', default=[], help='Published JSON for corroboration only; never supplies plotted estimates')
     parser.add_argument('--select-muons', action='store_true', help='Run installed ndlar_flow selection into a sidecar when FLOW has no segments')
+    parser.add_argument('--quality-select-segments', action='store_true',
+                        help='Veto stored segments using original event/hit references and electronics noise checks')
+    parser.add_argument('--quality-config', help='JSON overrides for provisional hit-quality cuts')
     parser.add_argument('--write-hdf5-metadata', action='store_true')
     parser.add_argument('--slow-controls', action='append', default=[], help='Raw snapshot JSON; repeat for multiple files')
     parser.add_argument('--timezone', default='America/Chicago', help='Calendar-day and six-hour bin timezone')
@@ -1096,6 +1105,10 @@ def main():
     parser.add_argument('--start', help='Inclusive export start, ISO timestamp with offset')
     parser.add_argument('--end', help='Exclusive export end, ISO timestamp with offset')
     args = parser.parse_args()
+    if args.quality_config and not (args.quality_select_segments or args.select_muons):
+        parser.error('--quality-config requires --quality-select-segments or --select-muons')
+    if args.quality_select_segments and args.select_muons:
+        parser.error('choose stored-segment quality veto or fresh selection, not both')
     if args.monitor_config:
         # Configured and legacy publication have different state/membership
         # contracts. Reject conflicting knobs instead of silently ignoring an
@@ -1130,6 +1143,16 @@ def main():
     if args.input_file:
         try:
             fit_input = args.input_file
+            quality_config = None
+            if args.quality_config:
+                with open(args.quality_config) as config_file:
+                    quality_config = json.load(config_file)
+            if args.quality_select_segments:
+                if is_remote(args.input_file):
+                    raise ValueError('hit-quality checks require a local full FLOW file')
+                from stored_quality import select_stored_muons
+                fit_input = str(Path(args.output_file_plot).with_suffix('.segments.h5'))
+                select_stored_muons(args.input_file, fit_input, quality_config=quality_config)
             if is_remote(args.input_file) and args.flow_cache:
                 from flow_input import cache_flow_segments
                 fit_input = cache_flow_segments(args.input_file, args.flow_cache or str(Path(args.output_file_json).parent/'flow_segments'),
@@ -1143,7 +1166,7 @@ def main():
                         raise ValueError('remote FLOW has no segments; full event selection requires a local FLOW file')
                     from track_selection import select_muons
                     fit_input = str(Path(args.output_file_plot).with_suffix('.segments.h5'))
-                    select_muons(args.input_file, fit_input)
+                    select_muons(args.input_file, fit_input, quality_config=quality_config)
             stamp = args.timestamp or date_from_filename(args.input_file).isoformat()
             fitted = fit_samples(fit_input, args.output_file_plot, args.sample, stamp)
             if fit_input != args.input_file and not is_remote(args.input_file):
