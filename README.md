@@ -49,6 +49,8 @@ The [recent-track CLI](docs/lifetime-recent-tracks.md) can instead gather a
 trailing six hours on demand, veto segments affected by hot pixels or coherent
 electronics noise using original FLOW hit references, and fit the pooled data.
 Its [quality cuts](docs/lifetime-track-quality.md) are configurable and provisional.
+The [track viewer](docs/lifetime-track-viewer.md) exports those saved pools to an
+offline browser display of parent tracks, original hits, and rejected context.
 
 Use `watcher.py --lifetime-config ...` with the lifetime action to process incoming
 FLOW, native packets and received slow-control snapshots. The watcher does not

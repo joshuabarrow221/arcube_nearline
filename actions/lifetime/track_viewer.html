@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lifetime track quality explorer</title>
+<style>
+:root{color-scheme:light;--ink:#172b40;--muted:#596c7e;--paper:#f3f6fa;--panel:#fff;--rule:#d7e0e9;--accent:#146b80;--kept:#087f76;--rejected:#b03a48;--invalid:#9c6500;--unselected:#7b8794}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select{font:inherit}button,select,input[type=file]{max-width:100%}button{border:1px solid var(--rule);border-radius:6px;background:white;color:var(--ink);padding:7px 12px;cursor:pointer}button:hover{background:#eaf2f7}button:disabled{cursor:default;opacity:.45}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #92c5df;outline-offset:2px}button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:white}select{border:1px solid var(--rule);border-radius:5px;padding:5px 7px;background:white;color:var(--ink)}input[type=checkbox]{accent-color:var(--accent)}h1,h2,h3,p{margin:0}h1{font-size:25px;font-weight:650;letter-spacing:-.5px}h2{font-size:16px;font-weight:650}h3{font-size:14px;font-weight:650}small,.small{font-size:12px}.muted{color:var(--muted)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.wrap{max-width:1680px;margin:auto;padding:24px}.masthead{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.eyebrow{font-size:11px;letter-spacing:1.6px;font-weight:700;color:var(--accent);text-transform:uppercase;margin-bottom:4px}.subtitle{max-width:900px;color:var(--muted);margin-top:6px}.import{max-width:280px}.import label{display:block;font-weight:600;margin-bottom:4px}.import input{font-size:12px;width:100%}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:20px}.stat{border:1px solid var(--rule);border-radius:8px;background:var(--panel);padding:12px 16px}.stat-label{color:var(--muted);font-size:12px}.stat-value{font-size:24px;font-weight:650;line-height:1.4;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.stat-note{font-size:12px;color:var(--muted)}.notice{display:flex;gap:12px;align-items:flex-start;padding:10px 14px;background:#e9f1f6;border-left:3px solid var(--accent);border-radius:3px;margin-top:16px;color:#29465a}.notice strong{white-space:nowrap}.window{margin-top:12px;overflow-wrap:anywhere}.window .mono{font-size:13px}.controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:14px 0;margin-top:6px}.control{display:flex;align-items:center;gap:7px}.views{display:flex;gap:3px}.views button{padding:6px 11px}.checkbox{display:flex;align-items:center;gap:5px;cursor:pointer}.workspace{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:16px;align-items:start}.plot-panel,.side-panel,.profile-panel{background:var(--panel);border:1px solid var(--rule);border-radius:9px;min-width:0;overflow:hidden}.plot-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--rule);gap:12px;flex-wrap:wrap}.legend{display:flex;gap:13px;flex-wrap:wrap;font-size:12px}.swatch{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}.main-plot{height:640px;width:100%}.plot-foot{padding:9px 16px;color:var(--muted);font-size:12px;border-top:1px solid var(--rule)}.side-head{padding:13px 14px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;gap:10px;align-items:center}.side-body{padding:14px}.pagination{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-top:7px}.pagination button{padding:5px 10px}.pagination span{font-size:12px;color:var(--muted)}.track-scroll{max-height:360px;overflow:auto}.tracks{width:100%;border-collapse:collapse;font-size:12px}.tracks th{text-align:left;font-size:11px;color:var(--muted);font-weight:600;position:sticky;top:0;background:#f7f9fc;z-index:1}.tracks th,.tracks td{padding:8px 10px;border-bottom:1px solid #e8edf2}.tracks td:nth-child(2),.tracks td:nth-child(3){font-variant-numeric:tabular-nums;text-align:right}.tracks th:nth-child(2),.tracks th:nth-child(3){text-align:right}.tracks tr.selected td{background:#e5f2f6}.track-button{border:none;border-radius:3px;background:transparent;padding:0;text-align:left;width:100%;display:flex;gap:7px;align-items:center}.track-dot{height:8px;width:8px;border-radius:50%;flex:none}.track-sub{display:block;font-size:10px;color:var(--muted)}.detail{border-top:1px solid var(--rule);padding:14px}.detail h3{margin-bottom:8px}.facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:5px 12px;font-size:12px;margin:0}.facts dt{color:var(--muted)}.facts dd{margin:0;overflow-wrap:anywhere}.detail .filename{font-size:11px;line-height:1.55;margin-top:10px;color:var(--muted)}details{margin-top:12px}summary{cursor:pointer;font-size:12px;color:var(--accent)}pre{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:230px;overflow:auto;background:#f5f7fa;padding:9px;border-radius:4px}.segment-detail{margin-top:14px;padding-top:12px;border-top:1px solid var(--rule)}.profile-panel{margin-top:16px}.profile{height:270px;width:100%}.footer{padding-top:15px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}.error{background:#fff0f1;border:1px solid #e5afb6;color:#8a2230;padding:12px 16px;border-radius:6px;margin:16px 0}.hidden,[hidden]{display:none!important}.mobile-help{display:none}.loading{padding:18px;color:var(--muted)}.tag{font-size:11px;padding:3px 7px;border-radius:4px;background:#eaf1f6;color:#365367;white-space:nowrap}
+@media(max-width:1100px){.workspace{grid-template-columns:minmax(0,1fr) 310px}.main-plot{height:570px}.wrap{padding:18px}.controls{gap:10px 13px}}
+@media(max-width:850px){.workspace{grid-template-columns:1fr}.side-panel{display:grid;grid-template-columns:1fr 1fr}.side-head{grid-column:1/-1}.track-scroll{max-height:300px}.detail{border-top:none;border-left:1px solid var(--rule)}.main-plot{height:520px}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.masthead{flex-wrap:wrap}.import{max-width:100%}.track-scroll{min-height:100px}}
+@media(max-width:500px){.wrap{padding:12px}.summary{gap:8px}.stat{padding:9px 11px}.stat-value{font-size:21px}h1{font-size:22px}.side-panel{display:block}.detail{border-left:none;border-top:1px solid var(--rule)}.main-plot{height:410px}.notice{display:block}.notice strong{display:block;margin-bottom:4px}.plot-head{padding:10px}.controls{gap:10px}.control{flex-wrap:wrap}.profile{height:230px}}
+</style>
+<script>__PLOTLY_JS__</script>
+</head>
+<body>
+<main class="wrap">
+  <header class="masthead">
+    <div>
+      <div class="eyebrow">2×2 · lifetime diagnostics</div>
+      <h1>Track quality explorer</h1>
+      <p class="subtitle">Inspect the parent tracks behind a pooled lifetime estimate, with original hit positions and whole-segment selection decisions.</p>
+    </div>
+    <div class="import">
+      <label for="load-json">Open another viewer export</label>
+      <input id="load-json" type="file" accept="application/json,.json">
+      <p class="small muted">Use exported viewer JSON; a summary alone has no hit coordinates.</p>
+    </div>
+  </header>
+  <div id="error" class="error" role="alert" hidden></div>
+  <section class="summary" aria-label="Pool summary">
+    <div class="stat"><div class="stat-label">Selection</div><div class="stat-value" id="selection">—</div><div class="stat-note" id="fit-state">—</div></div>
+    <div class="stat"><div class="stat-label">Segments in the pool</div><div class="stat-value" id="pool-segments">—</div><div class="stat-note" id="source-files">—</div></div>
+    <div class="stat"><div class="stat-label">Electron lifetime</div><div class="stat-value" id="lifetime">—</div><div class="stat-note">Conditional fit uncertainty; excludes selection systematics</div></div>
+    <div class="stat"><div class="stat-label">Exported parent tracks</div><div class="stat-value" id="exported-tracks">—</div><div class="stat-note" id="sampling-note">—</div></div>
+  </section>
+  <p class="window"><strong>Acquisition window:</strong> <span class="mono" id="window">—</span></p>
+  <div class="notice"><strong>Multiple-event overlay</strong><span>Tracks can come from different events and files. Crossings here do not imply a common event. “Retained” means included in the pooled segment sample; it does not establish a clean physical track or use in a particular fit bin.</span></div>
+  <section class="controls" aria-label="Display controls">
+    <div class="control"><span id="view-label">View</span><div class="views" role="group" aria-labelledby="view-label"><button type="button" data-view="3d" aria-pressed="true">3D</button><button type="button" data-view="xy" aria-pressed="false">XY</button><button type="button" data-view="xz" aria-pressed="false">XZ</button><button type="button" data-view="yz" aria-pressed="false">YZ</button></div></div>
+    <label class="control" for="color-by">Color <select id="color-by"><option value="track">Parent track</option><option value="status">Segment decision</option><option value="drift">Drift time</option></select></label>
+    <label class="checkbox"><input id="show-context" type="checkbox">Include rejected context</label>
+    <label class="checkbox"><input id="show-hits" type="checkbox" checked>Hits</label>
+    <label class="checkbox"><input id="show-segments" type="checkbox" checked>Segments</label>
+    <label class="checkbox"><input id="show-bounds" type="checkbox" checked>Module bounds</label>
+    <div class="views" role="group" aria-label="Plot extent"><button id="fit-detector" type="button" aria-pressed="true">Fit detector</button><button id="fit-all" type="button" aria-pressed="false">Fit all displayed</button></div>
+    <button id="reset-view" type="button">Reset view</button>
+  </section>
+  <section class="workspace">
+    <div class="plot-panel">
+      <div class="plot-head"><h2 id="plot-title">Parent-track overlay</h2><div class="legend" id="decision-legend"></div></div>
+      <div id="main-plot" class="main-plot" role="img" aria-label="Interactive track positions in centimetres"><p class="loading">Loading track geometry…</p></div>
+      <div class="plot-foot" id="plot-note" aria-live="polite">—</div>
+    </div>
+    <aside class="side-panel" aria-label="Parent tracks and selection details">
+      <div class="side-head"><div><h2>Parent tracks</h2><div class="pagination"><button id="previous" type="button" aria-label="Previous tracks">←</button><span id="page-label" aria-live="polite">—</span><button id="next" type="button" aria-label="Next tracks">→</button></div></div><label class="small" for="page-size">Per page <select id="page-size"><option>10</option><option selected>15</option><option>20</option></select></label></div>
+      <div class="track-scroll"><table class="tracks"><thead><tr><th scope="col">Track / event</th><th scope="col">Kept</th><th scope="col">Total</th></tr></thead><tbody id="track-list"></tbody></table></div>
+      <section class="detail" id="track-detail"><h3>Inspect a parent track</h3><p class="small muted">Select a row or click a hit or segment. All tracks on the page remain visible.</p></section>
+    </aside>
+  </section>
+  <section class="profile-panel" aria-label="Segment charge and drift distribution">
+    <div class="plot-head"><h2 id="profile-title">Segment charge versus drift time</h2><button id="clear-focus" type="button" disabled>Clear track focus</button></div>
+    <div id="profile" class="profile" role="img" aria-label="Segment dQ over dx against drift time in microseconds"></div>
+    <div class="plot-foot">Individual segment values, not fitted drift-bin peaks. Context points inherit the whole-segment decision; they do not identify which individual hit caused a veto.</div>
+  </section>
+  <footer class="footer"><p id="provenance">—</p><p id="fit-message"></p><p>Geometry uses recorded FLOW x, y, z in cm. Segment pieces are drawn independently; gaps between modules or pieces are never connected. This visual sample is for inspection, not an efficiency measurement.</p></footer>
+</main>
+<script id="viewer-data" type="application/json">__TRACK_VIEWER_DATA__</script>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const palette = ['#1f77b4','#d55e00','#009e73','#7b4ab5','#b13764','#3c7885','#ad7a00','#567f29','#c65e79','#4d58a4','#8d603b','#027f9b','#b54c24','#665c9d','#2e8659','#9b3577','#4a6c8d','#8a7633','#268b85','#a8514b'];
+  const statusColors = {retained:'#087f76',quality_rejected:'#b03a48',invalid:'#9c6500',not_selected:'#7b8794'};
+  const statusLabels = {retained:'Retained in pool',quality_rejected:'Quality-vetoed segment',invalid:'Numerically invalid segment',not_selected:'Outside selected sample'};
+  const state = {data:null,page:0,size:15,view:'3d',color:'track',context:false,hits:true,segments:true,bounds:true,extent:'detector',focus:null,segment:null,revision:0};
+  let redrawPending = false;
+  let rendering = false;
+  let rerender = false;
+  const finite = value => typeof value === 'number' && Number.isFinite(value);
+  const point = value => Array.isArray(value) && value.length === 3 && value.every(finite);
+  const count = value => finite(value) ? value.toLocaleString('en-US') : '—';
+  const number = (value,digits=2) => finite(value) ? value.toLocaleString('en-US',{maximumFractionDigits:digits}) : '—';
+  const esc = value => String(value ?? '—').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const label = status => statusLabels[status] || 'Unknown segment decision';
+  const visible = status => state.context || status === 'retained';
+  const trackColor = track => palette[track._index % palette.length];
+  const pages = () => Math.max(1,Math.ceil(state.data.tracks.length/state.size));
+  const pageTracks = () => state.data.tracks.slice(state.page*state.size,(state.page+1)*state.size);
+  const focused = () => state.data.tracks.find(track=>track.key===state.focus);
+  const fail = message => { $('error').textContent=message; $('error').hidden=false; };
+  const clearError = () => { $('error').hidden=true; $('error').textContent=''; };
+  function validate(data) {
+    if (!data || data.schema_version !== 1 || !Array.isArray(data.tracks) || !data.summary || !data.sampling || !Array.isArray(data.geometries)) {
+      throw new Error('This is not a track-viewer export. A pooled summary.json alone does not contain hit positions. Export it with track_viewer.py on the machine that can read the FLOW files, then open the resulting HTML or viewer JSON.');
+    }
+    const seen = new Set();
+    data.tracks.forEach((track,index)=>{
+      if (!track || typeof track.key !== 'string' || seen.has(track.key) || !Array.isArray(track.segments) || !track.hits) throw new Error('Invalid or duplicate parent-track record in this viewer export.');
+      seen.add(track.key);
+      for (const field of ['x','y','z','q','io_group','segment_row','status','hit_row']) {
+        if (!Array.isArray(track.hits[field])) throw new Error('Viewer export is missing a hit-coordinate or provenance array.');
+      }
+      const n = track.hits.x.length;
+      if (['y','z','q','io_group','segment_row','status','hit_row'].some(field=>track.hits[field].length!==n)) throw new Error('Viewer export has inconsistent hit-array lengths.');
+      for (const field of ['io_channel','chip_id','channel_id','t_drift_us','ts_pps_us']) if (track.hits[field] !== undefined && (!Array.isArray(track.hits[field]) || track.hits[field].length!==n)) throw new Error('Viewer export has an inconsistent optional electronics or timing array.');
+      track._index=index;
+      track._segments=new Map(track.segments.map(segment=>[segment.row,segment]));
+    });
+    return data;
+  }
+  function load(data) {
+    state.data=validate(data);
+    state.page=0; state.focus=null; state.segment=null; state.revision++;
+    state.context=state.data.tracks.length>0 && !state.data.tracks.some(track=>track.n_retained>0);
+    $('show-context').checked=state.context;
+    clearError();
+    updateSummary();
+    requestRender();
+  }
+  function updateSummary() {
+    const s=state.data.summary, sampling=state.data.sampling;
+    $('selection').textContent=s.selection || 'Unknown';
+    $('fit-state').textContent='Fit status: '+(s.fit_status || 'unavailable');
+    $('pool-segments').textContent=count(s.n_valid_segments);
+    $('source-files').textContent=count(s.n_files)+' source files';
+    $('lifetime').textContent=s.fit_status==='ok' && finite(s.lifetime_us) ? number(s.lifetime_us,2)+' ± '+number(s.error_us,2)+' µs' : 'Unavailable';
+    $('exported-tracks').textContent=count(state.data.tracks.length);
+    $('sampling-note').textContent='Of '+count(sampling.eligible_parent_tracks)+' eligible · '+(sampling.population || 'sample')+' · seed '+String(sampling.seed ?? '—');
+    $('window').textContent=(s.period_start || 'unknown')+' → '+(s.period_end || 'unknown')+' [start, end)';
+    $('provenance').textContent='Receipt: '+(s.receipt || 'not recorded');
+    $('fit-message').textContent=s.fit_message ? 'Fit diagnostic: '+s.fit_message : '';
+  }
+  function driftRange(tracks) {
+    const values=tracks.flatMap(track=>track.segments.filter(segment=>visible(segment.status)&&finite(segment.t_us)).map(segment=>segment.t_us));
+    if (!values.length) return [0,196];
+    const low=Math.min(...values), high=Math.max(...values);
+    return low===high ? [low,low+1] : [low,high];
+  }
+  const viridis=['#440154','#482878','#3e4989','#31688e','#26828e','#1f9e89','#35b779','#6ece58','#b5de2b','#fde725'];
+  function driftColor(time,range) {
+    if (!finite(time)) return '#7b8794';
+    const index=Math.max(0,Math.min(viridis.length-1,Math.floor((time-range[0])/(range[1]-range[0])*viridis.length)));
+    return viridis[index];
+  }
+  function color(track,status,time,range) {
+    if (state.color==='status') return statusColors[status] || '#7b8794';
+    if (state.color==='drift') return driftColor(time,range);
+    return trackColor(track);
+  }
+  function opacity(track,status) {
+    if (state.focus && state.focus!==track.key) return .12;
+    return status==='retained' ? .95 : .48;
+  }
+  function hover(track,segment,hit) {
+    const lines=['<b>Track '+esc(track.track_id ?? track.track_row)+'</b> · event '+esc(track.event_id),esc(track.file),label(segment?.status || hit?.status)];
+    if (segment) lines.push('Segment row '+esc(segment.row)+' · IO group '+esc(segment.io_group),'Segment drift '+number(segment.t_us,3)+' µs · dQ/dx '+number(segment.dqdx,3),'dx '+number(segment.dx,3)+' cm · '+count(segment.nhits)+' hits');
+    if (hit) {
+      lines.push('Hit row '+esc(hit.row)+' · Q '+number(hit.q,3));
+      if (hit.ioChannel !== undefined || hit.chip !== undefined || hit.pixel !== undefined) lines.push('Raw electronics (IO group/channel/chip/pixel): '+[hit.ioGroup,hit.ioChannel,hit.chip,hit.pixel].map(esc).join('/'));
+      if (hit.drift !== undefined) lines.push('Hit drift: '+number(hit.drift,3)+' µs');
+      if (hit.pps !== undefined) lines.push('PPS phase: '+number(hit.pps,3)+' µs (independent IO-group clock)');
+    }
+    return lines.join('<br>');
+  }
+  function spatialTrace(xyz,extras={}) {
+    if (state.view==='3d') return {type:'scatter3d',x:xyz[0],y:xyz[1],z:xyz[2],...extras};
+    const axes=state.view==='xy' ? [0,1] : state.view==='xz' ? [0,2] : [1,2];
+    return {type:'scattergl',x:xyz[axes[0]],y:xyz[axes[1]],...extras};
+  }
+  function geometryTraces(tracks) {
+    if (!state.bounds) return [];
+    const ids=new Set(tracks.map(track=>track.geometry_id));
+    const seen=new Set(), traces=[];
+    for (const geometry of state.data.geometries) {
+      if (!ids.has(geometry.id)) continue;
+      (geometry.bounds || []).forEach((bounds,moduleIndex)=>{
+        if (!Array.isArray(bounds) || !point(bounds[0]) || !point(bounds[1])) return;
+        const identity=JSON.stringify(bounds);
+        if (seen.has(identity)) return;
+        seen.add(identity);
+        const corners=[];
+        for (let index=0;index<8;index++) corners.push([bounds[(index>>2)&1][0],bounds[(index>>1)&1][1],bounds[index&1][2]]);
+        const xyz=[[],[],[]];
+        for (let index=0;index<8;index++) for (const mask of [1,2,4]) if (!(index&mask)) {
+          [corners[index],corners[index|mask],null].forEach(position=>xyz.forEach((axis,j)=>axis.push(position ? position[j] : null)));
+        }
+        traces.push(spatialTrace(xyz,{mode:'lines',line:{color:'#a9b6c3',width:1},opacity:.5,hoverinfo:'skip',showlegend:false,name:'Module '+(moduleIndex+1)}));
+      });
+    }
+    return traces;
+  }
+  function makeTraces(tracks,range) {
+    const traces=geometryTraces(tracks);
+    let shownHits=0, shownSegments=0;
+    for (const track of tracks) {
+      const groups=new Map();
+      if (state.segments) for (const segment of track.segments) {
+        if (!visible(segment.status) || !point(segment.start) || !point(segment.end)) continue;
+        const shade=color(track,segment.status,segment.t_us,range);
+        const key=segment.status+'|'+shade;
+        if (!groups.has(key)) groups.set(key,{status:segment.status,shade,xyz:[[],[],[]],text:[],custom:[]});
+        const group=groups.get(key);
+        for (const position of [segment.start,segment.end,null]) {
+          group.xyz.forEach((axis,j)=>axis.push(position ? position[j] : null));
+          group.text.push(position ? hover(track,segment) : '');
+          group.custom.push(position ? [track.key,segment.row,null] : null);
+        }
+        shownSegments++;
+      }
+      for (const group of groups.values()) traces.push(spatialTrace(group.xyz,{mode:'lines',line:{color:group.shade,width:state.focus===track.key ? 5 : 3,dash:group.status==='retained' ? 'solid' : 'dot'},opacity:opacity(track,group.status),text:group.text,customdata:group.custom,hovertemplate:'%{text}<extra></extra>',showlegend:false,name:'Track '+String(track.track_id ?? track.track_row),connectgaps:false}));
+      if (state.hits) {
+        const hitGroups=new Map(), hits=track.hits;
+        for (let i=0;i<hits.x.length;i++) {
+          const status=hits.status[i];
+          if (!visible(status) || ![hits.x[i],hits.y[i],hits.z[i]].every(finite)) continue;
+          const segment=track._segments.get(hits.segment_row[i]);
+          if (!hitGroups.has(status)) hitGroups.set(status,{xyz:[[],[],[]],colors:[],text:[],custom:[]});
+          const group=hitGroups.get(status);
+          [hits.x[i],hits.y[i],hits.z[i]].forEach((value,j)=>group.xyz[j].push(value));
+          group.colors.push(color(track,status,segment?.t_us,range));
+          group.text.push(hover(track,segment,{row:hits.hit_row[i],q:hits.q[i],status,ioGroup:hits.io_group[i],ioChannel:hits.io_channel?.[i],chip:hits.chip_id?.[i],pixel:hits.channel_id?.[i],drift:hits.t_drift_us?.[i],pps:hits.ts_pps_us?.[i]}));
+          group.custom.push([track.key,segment?.row ?? null,hits.hit_row[i]]);
+          shownHits++;
+        }
+        for (const [status,group] of hitGroups) traces.push(spatialTrace(group.xyz,{mode:'markers',marker:{color:group.colors,size:state.view==='3d' ? (state.focus===track.key ? 3.5 : 2.3) : (state.focus===track.key ? 6 : 4),symbol:status==='retained' ? 'circle' : 'x'},opacity:opacity(track,status),text:group.text,customdata:group.custom,hovertemplate:'%{text}<extra></extra>',showlegend:false,name:'Track '+String(track.track_id ?? track.track_row)}));
+      }
+    }
+    if (state.color==='drift' && tracks.length) {
+      traces.push(spatialTrace([[null],[null],[null]],{mode:'markers',marker:{color:[range[0]],cmin:range[0],cmax:range[1],colorscale:'Viridis',showscale:true,colorbar:{title:{text:'Drift [µs]'},thickness:12,len:.65}},hoverinfo:'skip',showlegend:false}));
+    }
+    return {traces,shownHits,shownSegments};
+  }
+  function detectorRanges(tracks) {
+    const ids=new Set(tracks.map(track=>track.geometry_id)), bounds=[];
+    for (const geometry of state.data.geometries) if (ids.has(geometry.id)) for (const box of geometry.bounds || []) if (Array.isArray(box) && point(box[0]) && point(box[1])) bounds.push(box);
+    if (!bounds.length) return null;
+    return [0,1,2].map(axis=>{const low=Math.min(...bounds.map(box=>box[0][axis])),high=Math.max(...bounds.map(box=>box[1][axis])),pad=Math.max(1,(high-low)*.06);return [low-pad,high+pad];});
+  }
+  function chartLayout(tracks) {
+    const ranges=state.extent==='detector' ? detectorRanges(tracks) : null;
+    const layout={margin:{l:15,r:15,t:5,b:10},paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{family:'system-ui, sans-serif',size:12,color:'#354e63'},showlegend:false,uirevision:state.view+'-'+state.revision,hovermode:'closest'};
+    if (state.view==='3d') {
+      layout.scene={aspectmode:'data',xaxis:{title:{text:'X [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},yaxis:{title:{text:'Y [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},zaxis:{title:{text:'Z [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},camera:{eye:{x:1.5,y:-1.8,z:1.0}}};
+      if (ranges) ['xaxis','yaxis','zaxis'].forEach((axis,i)=>{layout.scene[axis].range=ranges[i];layout.scene[axis].autorange=false;});
+    }
+    else {
+      const axes=state.view.toUpperCase().split('');
+      layout.margin={l:60,r:30,t:10,b:55};
+      layout.xaxis={title:{text:axes[0]+' [cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4',constrain:'domain'};
+      layout.yaxis={title:{text:axes[1]+' [cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4',scaleanchor:'x',scaleratio:1,constrain:'domain'};
+      if (ranges) {const indices=state.view==='xy' ? [0,1] : state.view==='xz' ? [0,2] : [1,2];layout.xaxis.range=ranges[indices[0]];layout.xaxis.autorange=false;layout.yaxis.range=ranges[indices[1]];layout.yaxis.autorange=false;}
+    }
+    return layout;
+  }
+  function renderTable(tracks) {
+    const body=$('track-list'); body.replaceChildren();
+    for (const track of tracks) {
+      const row=document.createElement('tr');
+      row.classList.toggle('selected',state.focus===track.key);
+      const idCell=document.createElement('td'), button=document.createElement('button');
+      button.className='track-button'; button.type='button';
+      button.setAttribute('aria-pressed',String(state.focus===track.key));
+      const dot=document.createElement('span'); dot.className='track-dot'; dot.style.background=trackColor(track);
+      const text=document.createElement('span'); text.textContent='Track '+String(track.track_id ?? track.track_row);
+      const sub=document.createElement('span'); sub.className='track-sub'; sub.textContent='Event '+String(track.event_id)+' · file '+String((track.member_index ?? 0)+1); text.append(sub);
+      button.append(dot,text); button.addEventListener('click',()=>selectTrack(track.key,null)); idCell.append(button); row.append(idCell);
+      for (const value of [track.n_retained,track.n_segments]) {const cell=document.createElement('td');cell.textContent=count(value);row.append(cell);}
+      body.append(row);
+    }
+    if (!tracks.length) {const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=3;cell.textContent='No parent tracks in this export.';row.append(cell);body.append(row);}
+    $('page-label').textContent='Page '+(state.page+1)+' / '+pages();
+    $('previous').disabled=state.page===0; $('next').disabled=state.page>=pages()-1;
+  }
+  function renderLegend() {
+    const legend=$('decision-legend');legend.replaceChildren();
+    if (state.color==='status') {
+      for (const [status,name] of [['retained','Retained'],['quality_rejected','Quality veto'],['invalid','Invalid numbers']]) {const item=document.createElement('span'),swatch=document.createElement('i');swatch.className='swatch';swatch.style.background=statusColors[status];item.append(swatch,document.createTextNode(name));legend.append(item);}
+    } else {
+      for (const text of ['● Solid: retained','× Dotted: rejected context',state.color==='track' ? 'Color: parent track' : 'Color: drift time']) {const item=document.createElement('span');item.textContent=text;legend.append(item);}
+    }
+  }
+  function addFacts(parent,entries) {
+    const list=document.createElement('dl');list.className='facts';
+    entries.forEach(([key,value])=>{const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=key;description.textContent=String(value ?? '—');list.append(term,description);});parent.append(list);
+  }
+  function renderDetail() {
+    const target=$('track-detail');target.replaceChildren();
+    const track=focused(),heading=document.createElement('h3');
+    $('clear-focus').disabled=!track;
+    if (!track) {heading.textContent='Inspect a parent track';const text=document.createElement('p');text.className='small muted';text.textContent='Select a row or click a hit or segment. All tracks on the page remain visible.';target.append(heading,text);return;}
+    heading.textContent='Track '+String(track.track_id ?? track.track_row);target.append(heading);
+    addFacts(target,[['Event ID / row',String(track.event_id)+' / '+String(track.event_row)],['Track row',track.track_row],['Timing category',track.sample],['IO groups',(track.io_groups || []).join(', ')],['Retained segments',count(track.n_retained)+' / '+count(track.n_segments)],['Quality vetoes',count(track.n_quality_rejected)],['Invalid numbers',count(track.n_invalid)],['Parent length',number(track.length_cm,2)+' cm'],['Hits exported',count(track.hit_displayed)+' / '+count(track.hit_total)]]);
+    const filename=document.createElement('p');filename.className='filename mono';filename.textContent=track.source_path || track.file;target.append(filename);
+    if (track.event_time) {const time=document.createElement('p');time.className='small muted';time.textContent='Event time: '+track.event_time;target.append(time);}
+    if (track.quality_diagnostics?.length) {
+      const details=document.createElement('details'),summary=document.createElement('summary'),note=document.createElement('p'),pre=document.createElement('pre');
+      summary.textContent='Event-level quality evidence';note.className='small muted';note.textContent='Shared event context, including hits outside this parent track. These counters are not per-segment veto reasons.';pre.textContent=JSON.stringify(track.quality_diagnostics,null,2);details.append(summary,note,pre);target.append(details);
+    }
+    const segment=track._segments.get(state.segment);
+    const section=document.createElement('section');section.className='segment-detail';const title=document.createElement('h3');title.textContent=segment ? 'Segment row '+segment.row : 'Segment details';section.append(title);
+    if (segment) addFacts(section,[['Decision',label(segment.status)],['Stored ID',segment.id],['IO group',segment.io_group],['Drift time',number(segment.t_us,3)+' µs'],['dQ / dx',number(segment.dqdx,4)],['dQ',number(segment.dQ,4)],['dx',number(segment.dx,4)+' cm'],['Hits',count(segment.nhits)]]);
+    else {const note=document.createElement('p');note.className='small muted';note.textContent='Click a point or segment in either plot to inspect its original row.';section.append(note);}
+    target.append(section);
+  }
+  function profileTraces(tracks,range) {
+    const selected=focused(),list=selected ? [selected] : tracks,traces=[];
+    for (const track of list) {
+      const groups=new Map();
+      for (const segment of track.segments) {
+        if (!visible(segment.status) || !finite(segment.t_us) || !finite(segment.dqdx)) continue;
+        if (!groups.has(segment.status)) groups.set(segment.status,{x:[],y:[],color:[],text:[],custom:[]});
+        const group=groups.get(segment.status);group.x.push(segment.t_us);group.y.push(segment.dqdx);group.color.push(color(track,segment.status,segment.t_us,range));group.text.push(hover(track,segment));group.custom.push([track.key,segment.row,null]);
+      }
+      for (const [status,group] of groups) traces.push({type:'scattergl',mode:'markers',x:group.x,y:group.y,marker:{color:group.color,size:7,symbol:status==='retained' ? 'circle' : 'x'},opacity:status==='retained' ? .85 : .55,text:group.text,customdata:group.custom,hovertemplate:'%{text}<extra></extra>',showlegend:false});
+    }
+    $('profile-title').textContent=selected ? 'Track '+String(selected.track_id ?? selected.track_row)+' · segment charge versus drift' : 'Displayed tracks · segment charge versus drift';
+    return traces;
+  }
+  function selectTrack(key,segment) {
+    if (!state.data.tracks.some(track=>track.key===key)) return;
+    state.focus=key;state.segment=segment;requestRender();
+  }
+  function plotClick(event) {
+    const point=event.points?.find(item=>Array.isArray(item.customdata));
+    if (point) selectTrack(point.customdata[0],point.customdata[1]);
+  }
+  function requestRender() {
+    if (redrawPending) return;
+    redrawPending=true;
+    requestAnimationFrame(()=>{redrawPending=false;render();});
+  }
+  async function render() {
+    if (!state.data) return;
+    if (rendering) {rerender=true;return;}
+    rendering=true;
+    try {
+      const tracks=pageTracks(), range=driftRange(tracks), drawing=makeTraces(tracks,range);
+      renderTable(tracks);renderDetail();renderLegend();
+      $('plot-title').textContent=tracks.length+' parent track'+(tracks.length===1 ? '' : 's')+' · '+(state.view==='3d' ? '3D overlay' : state.view.toUpperCase()+' projection');
+      const hitTotal=tracks.reduce((total,track)=>total+(track.hit_total || 0),0), hitExported=tracks.reduce((total,track)=>total+(track.hit_displayed || 0),0);
+      const downsample=hitExported<hitTotal ? ' Hit display is sampled; segment decisions use the full source data.' : '';
+      const ranges=state.extent==='detector' ? detectorRanges(tracks) : null;
+      let outsideFrame=0;
+      if (ranges && state.hits) for (const track of tracks) for (let i=0;i<track.hits.x.length;i++) if (visible(track.hits.status[i])) {const position=[track.hits.x[i],track.hits.y[i],track.hits.z[i]];if(position.every(finite)&&position.some((value,axis)=>value<ranges[axis][0]||value>ranges[axis][1]))outsideFrame++;}
+      const clipping=outsideFrame ? ' '+count(outsideFrame)+' hit points lie outside the detector frame; use “Fit all displayed” to inspect them.' : '';
+      $('plot-note').textContent=count(drawing.shownHits)+' selected hit points · '+count(drawing.shownSegments)+' segment pieces · '+(state.context ? 'rejected context shown' : 'retained segments only')+'.'+downsample+clipping+' Click to inspect; drag to '+(state.view==='3d' ? 'rotate' : 'pan/zoom')+'.';
+      const config={responsive:true,displaylogo:false,scrollZoom:true,toImageButtonOptions:{format:'png',filename:'lifetime-track-inspection',scale:2}};
+      $('main-plot').querySelector('.loading')?.remove();
+      await Plotly.react('main-plot',drawing.traces,chartLayout(tracks),config);
+      await Plotly.react('profile',profileTraces(tracks,range),{margin:{l:65,r:25,t:10,b:50},paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{family:'system-ui, sans-serif',size:12,color:'#354e63'},xaxis:{title:{text:'Drift time [µs]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},yaxis:{title:{text:'dQ / dx [FLOW units / cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},showlegend:false,hovermode:'closest',uirevision:'profile-'+state.page+'-'+(state.focus || '')+'-'+state.context},config);
+      for (const id of ['main-plot','profile']) {$(id).removeAllListeners('plotly_click');$(id).on('plotly_click',plotClick);}
+      document.documentElement.dataset.viewerReady='true';
+    } catch (error) {fail('The display could not render: '+error.message);}
+    finally {rendering=false;if(rerender){rerender=false;requestRender();}}
+  }
+  document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>{state.view=button.dataset.view;document.querySelectorAll('[data-view]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));requestRender();}));
+  $('color-by').addEventListener('change',event=>{state.color=event.target.value;requestRender();});
+  [['show-context','context'],['show-hits','hits'],['show-segments','segments'],['show-bounds','bounds']].forEach(([id,key])=>$(id).addEventListener('change',event=>{state[key]=event.target.checked;requestRender();}));
+  $('previous').addEventListener('click',()=>{state.page=Math.max(0,state.page-1);state.focus=null;state.segment=null;requestRender();});
+  $('next').addEventListener('click',()=>{state.page=Math.min(pages()-1,state.page+1);state.focus=null;state.segment=null;requestRender();});
+  $('page-size').addEventListener('change',event=>{state.size=Number(event.target.value);state.page=0;state.focus=null;state.segment=null;requestRender();});
+  $('reset-view').addEventListener('click',()=>{state.revision++;requestRender();});
+  [['fit-detector','detector'],['fit-all','all']].forEach(([id,extent])=>$(id).addEventListener('click',()=>{state.extent=extent;state.revision++;$('fit-detector').setAttribute('aria-pressed',String(extent==='detector'));$('fit-all').setAttribute('aria-pressed',String(extent==='all'));requestRender();}));
+  $('clear-focus').addEventListener('click',()=>{state.focus=null;state.segment=null;requestRender();});
+  $('load-json').addEventListener('change',async event=>{const file=event.target.files?.[0];if(!file)return;try{load(JSON.parse(await file.text()));}catch(error){fail(error.message);}event.target.value='';});
+  window.trackViewer={load,getState:()=>({page:state.page,size:state.size,view:state.view,color:state.color,context:state.context,focus:state.focus,tracks:state.data?.tracks.length || 0}),selectTrack};
+  try {if(typeof Plotly==='undefined')throw new Error('The bundled plotting library is missing. Regenerate this HTML with track_viewer.py.');load(JSON.parse($('viewer-data').textContent));} catch(error){fail(error.message);}
+})();
+</script>
+</body>
+</html>

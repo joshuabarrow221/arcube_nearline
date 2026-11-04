@@ -105,6 +105,10 @@ Each invocation creates a new `recent-*` directory below `--output`:
 - `selections/`: vetted or freshly reconstructed per-file sidecars, when used;
 - `fit.png`: the diagnostic figure if the shared fitter accepts the estimate.
 
+Use the [track viewer](lifetime-track-viewer.md) to inspect the pooled parents
+and their retained/rejected segment geometry in a browser. Export it beside the
+original FLOW files and selection sidecars; the summary alone has no hit positions.
+
 An input error prevents fitting a silently incomplete pool. No valid segments,
 failed fits and rejected estimates produce a JSON receipt with null lifetime
 and process exit status **2**; an accepted fit returns **0**. Argument/discovery
