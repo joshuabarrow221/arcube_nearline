@@ -48,7 +48,7 @@
   </section>
   <section class="workspace">
     <div class="plot-panel">
-      <div class="plot-head"><h2 id="plot-title">Parent-track overlay</h2><div class="legend" id="decision-legend"></div></div>
+      <div class="plot-head"><h2 id="plot-title">Parent-track overlay</h2><span class="tag" id="scale-warning" hidden>Independent axis scales</span><div class="legend" id="decision-legend"></div></div>
       <div id="main-plot" class="main-plot" role="img" aria-label="Interactive track positions in centimetres"><p class="loading">Loading track geometry…</p></div>
       <div class="plot-foot" id="plot-note" aria-live="polite">—</div>
     </div>
@@ -237,19 +237,43 @@
     if (!bounds.length) return null;
     return [0,1,2].map(axis=>{const low=Math.min(...bounds.map(box=>box[0][axis])),high=Math.max(...bounds.map(box=>box[1][axis])),pad=Math.max(1,(high-low)*.06);return [low-pad,high+pad];});
   }
-  function chartLayout(tracks) {
-    const ranges=state.extent==='detector' ? detectorRanges(tracks) : null;
+  function displayedRanges(tracks) {
+    const low=[Infinity,Infinity,Infinity], high=[-Infinity,-Infinity,-Infinity];
+    function include(position) {
+      if (!point(position)) return;
+      position.forEach((value,axis)=>{low[axis]=Math.min(low[axis],value);high[axis]=Math.max(high[axis],value);});
+    }
+    if (state.bounds) {
+      const ids=new Set(tracks.map(track=>track.geometry_id));
+      for (const geometry of state.data.geometries) if (ids.has(geometry.id)) for (const box of geometry.bounds || []) if (Array.isArray(box)) {include(box[0]);include(box[1]);}
+    }
+    for (const track of tracks) {
+      if (state.segments) for (const segment of track.segments) if (visible(segment.status)) {include(segment.start);include(segment.end);}
+      if (state.hits) for (let i=0;i<track.hits.x.length;i++) if (visible(track.hits.status[i])) include([track.hits.x[i],track.hits.y[i],track.hits.z[i]]);
+    }
+    if (!low.every(finite)) return null;
+    return low.map((value,axis)=>{const pad=Math.max(1,(high[axis]-value)*.06);return [value-pad,high[axis]+pad];});
+  }
+  function plotFrame(tracks) {
+    const ranges=state.extent==='detector' ? detectorRanges(tracks) : displayedRanges(tracks);
+    const indices=state.view==='xy' ? [0,1] : state.view==='xz' ? [0,2] : state.view==='yz' ? [1,2] : [0,1,2];
+    const spans=ranges ? indices.map(axis=>ranges[axis][1]-ranges[axis][0]) : [];
+    const independent=state.extent==='all' && spans.length>0 && Math.max(...spans)>4*Math.min(...spans);
+    return {ranges,indices,independent};
+  }
+  function chartLayout(frame) {
+    const {ranges,indices,independent}=frame;
     const layout={margin:{l:15,r:15,t:5,b:10},paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{family:'system-ui, sans-serif',size:12,color:'#354e63'},showlegend:false,uirevision:state.view+'-'+state.revision,hovermode:'closest'};
     if (state.view==='3d') {
-      layout.scene={aspectmode:'data',xaxis:{title:{text:'X [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},yaxis:{title:{text:'Y [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},zaxis:{title:{text:'Z [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},camera:{eye:{x:1.5,y:-1.8,z:1.0}}};
+      layout.scene={aspectmode:independent ? 'cube' : 'data',xaxis:{title:{text:'X [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},yaxis:{title:{text:'Y [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},zaxis:{title:{text:'Z [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},camera:{eye:{x:1.5,y:-1.8,z:1.0}}};
       if (ranges) ['xaxis','yaxis','zaxis'].forEach((axis,i)=>{layout.scene[axis].range=ranges[i];layout.scene[axis].autorange=false;});
     }
     else {
       const axes=state.view.toUpperCase().split('');
       layout.margin={l:60,r:30,t:10,b:55};
       layout.xaxis={title:{text:axes[0]+' [cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4',constrain:'domain'};
-      layout.yaxis={title:{text:axes[1]+' [cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4',scaleanchor:'x',scaleratio:1,constrain:'domain'};
-      if (ranges) {const indices=state.view==='xy' ? [0,1] : state.view==='xz' ? [0,2] : [1,2];layout.xaxis.range=ranges[indices[0]];layout.xaxis.autorange=false;layout.yaxis.range=ranges[indices[1]];layout.yaxis.autorange=false;}
+      layout.yaxis={title:{text:axes[1]+' [cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4',scaleanchor:independent ? false : 'x',scaleratio:1,constrain:'domain'};
+      if (ranges) {layout.xaxis.range=ranges[indices[0]];layout.xaxis.autorange=false;layout.yaxis.range=ranges[indices[1]];layout.yaxis.autorange=false;}
     }
     return layout;
   }
@@ -335,7 +359,7 @@
     if (rendering) {rerender=true;return;}
     rendering=true;
     try {
-      const tracks=pageTracks(), range=driftRange(tracks), drawing=makeTraces(tracks,range);
+      const tracks=pageTracks(), range=driftRange(tracks), drawing=makeTraces(tracks,range), frame=plotFrame(tracks);
       renderTable(tracks);renderDetail();renderLegend();
       $('plot-title').textContent=tracks.length+' parent track'+(tracks.length===1 ? '' : 's')+' · '+(state.view==='3d' ? '3D overlay' : state.view.toUpperCase()+' projection');
       const hitTotal=tracks.reduce((total,track)=>total+(track.hit_total || 0),0), hitExported=tracks.reduce((total,track)=>total+(track.hit_displayed || 0),0);
@@ -344,11 +368,15 @@
       let outsideFrame=0;
       if (ranges && state.hits) for (const track of tracks) for (let i=0;i<track.hits.x.length;i++) if (visible(track.hits.status[i])) {const position=[track.hits.x[i],track.hits.y[i],track.hits.z[i]];if(position.every(finite)&&position.some((value,axis)=>value<ranges[axis][0]||value>ranges[axis][1]))outsideFrame++;}
       const clipping=outsideFrame ? ' '+count(outsideFrame)+' hit points lie outside the detector frame; use “Fit all displayed” to inspect them.' : '';
-      $('plot-note').textContent=count(drawing.shownHits)+' selected hit points · '+count(drawing.shownSegments)+' segment pieces · '+(state.context ? 'rejected context shown' : 'retained segments only')+'.'+downsample+clipping+' Click to inspect; drag to '+(state.view==='3d' ? 'rotate' : 'pan/zoom')+'.';
-      const config={responsive:true,displaylogo:false,scrollZoom:true,toImageButtonOptions:{format:'png',filename:'lifetime-track-inspection',scale:2}};
+      const scaling=frame.independent ? ' Independent axis scales keep extreme coordinates visible; apparent angles and length ratios are distorted. Use “Fit detector” for physical proportions.' : '';
+      $('scale-warning').hidden=!frame.independent;
+      $('plot-note').textContent=count(drawing.shownHits)+' displayed hit points · '+count(drawing.shownSegments)+' segment pieces · '+(state.context ? 'rejected context shown' : 'retained segments only')+'.'+downsample+clipping+scaling+' Click to inspect; drag to '+(state.view==='3d' ? 'rotate' : 'pan/zoom')+'.';
+      const safeName=value=>String(value || 'unknown').replace(/[^A-Za-z0-9_+\-]/g,'');
+      const stem='lifetime_tracks__'+safeName(state.data.summary.period_start)+'_to_'+safeName(state.data.summary.period_end)+'__'+safeName(state.data.summary.selection)+'__page'+(state.page+1)+(state.focus ? '__'+safeName(state.focus) : '');
+      const config={responsive:true,displaylogo:false,scrollZoom:true,toImageButtonOptions:{format:'png',filename:stem+'__'+state.view,scale:2}};
       $('main-plot').querySelector('.loading')?.remove();
-      await Plotly.react('main-plot',drawing.traces,chartLayout(tracks),config);
-      await Plotly.react('profile',profileTraces(tracks,range),{margin:{l:65,r:25,t:10,b:50},paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{family:'system-ui, sans-serif',size:12,color:'#354e63'},xaxis:{title:{text:'Drift time [µs]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},yaxis:{title:{text:'dQ / dx [FLOW units / cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},showlegend:false,hovermode:'closest',uirevision:'profile-'+state.page+'-'+(state.focus || '')+'-'+state.context},config);
+      await Plotly.react('main-plot',drawing.traces,chartLayout(frame),config);
+      await Plotly.react('profile',profileTraces(tracks,range),{margin:{l:65,r:25,t:10,b:50},paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{family:'system-ui, sans-serif',size:12,color:'#354e63'},xaxis:{title:{text:'Drift time [µs]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},yaxis:{title:{text:'dQ / dx [FLOW units / cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},showlegend:false,hovermode:'closest',uirevision:'profile-'+state.page+'-'+(state.focus || '')+'-'+state.context},{...config,toImageButtonOptions:{...config.toImageButtonOptions,filename:stem+'__dqdx'}});
       for (const id of ['main-plot','profile']) {$(id).removeAllListeners('plotly_click');$(id).on('plotly_click',plotClick);}
       document.documentElement.dataset.viewerReady='true';
     } catch (error) {fail('The display could not render: '+error.message);}

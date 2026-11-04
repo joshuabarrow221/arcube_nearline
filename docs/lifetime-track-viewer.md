@@ -53,6 +53,10 @@ independent IO-group clocks, not absolute event times. Individual segment
 pieces are never connected across gaps or modules. The default view fits the
 detector bounds; **Fit all displayed** includes distant reconstructed outliers.
 Out-of-frame hit counts are shown when applicable.
+When extreme outliers require unequal axis scales in the all-data view, a
+visible warning states that angles and length ratios are distorted. Return to
+**Fit detector** for equal spatial scales. The plot download buttons include
+both recorded time boundaries, selection mode, page and view in PNG filenames.
 
 This is an overlay of different events and files. Apparent crossings do not
 imply a single physical interaction. `beam` and `cosmic` retain the upstream
