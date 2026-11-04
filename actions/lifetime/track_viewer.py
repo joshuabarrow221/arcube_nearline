@@ -6,6 +6,13 @@ selection sidecars, and pooled segments on NERSC, then copy the HTML anywhere.
 Saved lifetime fits and cuts are unchanged. A separate full-pool direct dQ/ds
 charge-scale diagnostic runs unless disabled. Source files are read-only.
 """
+# A Jupyter parent can export its inline backend into a different Python env.
+# Select a built-in headless backend before any transitive Matplotlib import;
+# importing this module as a library must not alter the caller's environment.
+if __name__ == '__main__':
+    import os
+    os.environ['MPLBACKEND'] = 'Agg'
+
 import argparse
 from contextlib import ExitStack
 from datetime import datetime, timezone
@@ -346,12 +353,13 @@ def build_payload(summary_path, max_tracks=100, seed=0, population='retained', m
         raise ValueError('receipt contains input errors; no complete pooled sample was fitted')
     if not summary.get('members'):
         raise ValueError('receipt contains no input members')
+    # Fail on unavailable fitting dependencies before reading every FLOW file.
+    from charge_scale import charge_scale_payload
     inventories = []
     for i, member in enumerate(summary['members']):
         inventories.append(_member_inventory(member, i, mode, receipt, path_maps))
         print(f"Verified {i + 1}/{len(summary['members'])}: {Path(member['input_file']).name}", file=sys.stderr, flush=True)
     pooled_path = _verify_pool(summary, inventories, receipt, path_maps)
-    from charge_scale import charge_scale_payload
     tick_periods = {inv['tick_us'] for inv in inventories}
     with h5py.File(pooled_path, 'r') as pool:
         full_pool = pool[POOL + '/data'][:] if fit_charge and len(tick_periods) == 1 else None

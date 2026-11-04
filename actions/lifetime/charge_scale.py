@@ -5,6 +5,12 @@ The saved lifetime amplitude is a LEGACY PROXY, not raw dQ/ds. The optional
 direct diagnostic fits Langau MPVs of dQ/ds from the full pooled segment array.
 These two observables have different units and must never share a fitted curve.
 """
+# HTML export is headless, even when a notebook launches this CLI with an
+# inline-backend setting belonging to a different Python environment.
+if __name__ == '__main__':
+    import os
+    os.environ['MPLBACKEND'] = 'Agg'
+
 import argparse
 from datetime import datetime, timezone
 import glob

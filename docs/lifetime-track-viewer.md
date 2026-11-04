@@ -25,6 +25,50 @@ JSON can be loaded with **Open another viewer export** in any exported display.
 It is a portable coordinate/lineage export, not the original summary receipt.
 The HTML already includes its own data; its JSON companion is not required.
 
+## Generate from a Jupyter notebook on NERSC
+
+The exporter can read NERSC paths directly from a notebook subprocess. Write
+the HTML inside a directory visible in JupyterLab, then open it with **Open
+With → HTML Viewer → Trust HTML**. No manual download is needed for viewing.
+The browser's **Open another viewer export** picker still selects files from
+the browser's device, not paths on NERSC; it accepts exported viewer JSON.
+
+When launching a separate analysis environment, explicitly select the
+headless Matplotlib backend in the **child** environment:
+
+```python
+import os
+import subprocess
+from pathlib import Path
+
+repo = Path('/global/cfs/cdirs/dune/users/jbarrow/arcube_nearline')
+python = '/global/cfs/cdirs/dune/users/jbarrow/envs/purity-py312/bin/python'
+summary = Path('/path/to/recent-XXXX/summary.json')
+output = Path.cwd() / 'tracks__WINDOW__quality-stored.html'
+viewer_env = os.environ.copy()
+viewer_env['MPLBACKEND'] = 'Agg'
+
+subprocess.run([
+    python, str(repo / 'actions/lifetime/track_viewer.py'), str(summary),
+    '--output', str(output), '--max-tracks', '100', '--seed', '7',
+], check=True, env=viewer_env)
+print(output)
+```
+
+An inherited `module://matplotlib_inline.backend_inline` may be unavailable
+in the analysis environment even when it works in the parent notebook. This
+can fail while importing shared fitting code, before any figure is created.
+The viewer and charge-scale CLI now select `Agg` before those imports; the
+explicit subprocess environment also fixes older checkouts. It does not alter
+the parent notebook's backend or the browser's interactive Plotly display.
+Installing Jupyter packages into the analysis environment is unnecessary.
+
+If this error occurs after all `Verified` messages, the exporter has not yet
+written its new HTML. Rerun only the export cell with the child environment
+above; the saved lifetime analysis and selection sidecars need not be rerun.
+
+## Inputs and relocation
+
 **A summary alone is insufficient.** The exporter reads the original FLOW,
 saved selection sidecars, and pooled `segments.h5` referenced by the receipt.
 Generate the HTML while those files are available on NERSC. A summary copied
