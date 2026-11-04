@@ -51,6 +51,9 @@ electronics noise using original FLOW hit references, and fit the pooled data.
 Its [quality cuts](docs/lifetime-track-quality.md) are configurable and provisional.
 The [track viewer](docs/lifetime-track-viewer.md) exports those saved pools to an
 offline browser display of parent tracks, original hits, and rejected context.
+It includes Y-up rotation, offline GIF export, and full-pool zero-drift charge
+diagnostics. The [charge-scale monitor](docs/lifetime-charge-scale.md) compares
+the intercepts across saved acquisition windows.
 
 Use `watcher.py --lifetime-config ...` with the lifetime action to process incoming
 FLOW, native packets and received slow-control snapshots. The watcher does not

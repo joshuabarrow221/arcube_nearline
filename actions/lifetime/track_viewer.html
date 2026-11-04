@@ -12,6 +12,7 @@
 @media(max-width:500px){.wrap{padding:12px}.summary{gap:8px}.stat{padding:9px 11px}.stat-value{font-size:21px}h1{font-size:22px}.side-panel{display:block}.detail{border-left:none;border-top:1px solid var(--rule)}.main-plot{height:410px}.notice{display:block}.notice strong{display:block;margin-bottom:4px}.plot-head{padding:10px}.controls{gap:10px}.control{flex-wrap:wrap}.profile{height:230px}}
 </style>
 <script>__PLOTLY_JS__</script>
+<script>__GIF_ENCODER_JS__</script>
 </head>
 <body>
 <main class="wrap">
@@ -45,6 +46,10 @@
     <label class="checkbox"><input id="show-bounds" type="checkbox" checked>Module bounds</label>
     <div class="views" role="group" aria-label="Plot extent"><button id="fit-detector" type="button" aria-pressed="true">Fit detector</button><button id="fit-all" type="button" aria-pressed="false">Fit all displayed</button></div>
     <button id="reset-view" type="button">Reset view</button>
+    <button id="rotate-view" type="button" aria-pressed="false">Autorotate</button>
+    <button id="save-gif" type="button">Save rotation GIF</button>
+    <button id="cancel-gif" type="button" hidden>Cancel GIF</button>
+    <span id="animation-status" class="small muted" role="status" aria-live="polite">Y upward · beam forward +Z · X transverse</span>
   </section>
   <section class="workspace">
     <div class="plot-panel">
@@ -59,8 +64,8 @@
     </aside>
   </section>
   <section class="profile-panel" aria-label="Segment charge and drift distribution">
-    <div class="plot-head"><h2 id="profile-title">Segment charge versus drift time</h2><button id="clear-focus" type="button" disabled>Clear track focus</button></div>
-    <div id="profile" class="profile" role="img" aria-label="Segment dQ over dx against drift time in microseconds"></div>
+    <div class="plot-head"><h2 id="profile-title">Segment dQ/ds versus drift time</h2><button id="clear-focus" type="button" disabled>Clear track focus</button></div>
+    <div id="profile" class="profile" role="img" aria-label="Segment dQ over path length against drift time in microseconds"></div>
     <div class="plot-foot">Individual segment values, not fitted drift-bin peaks. Context points inherit the whole-segment decision; they do not identify which individual hit caused a veto.</div>
   </section>
   <footer class="footer"><p id="provenance">—</p><p id="fit-message"></p><p>Geometry uses recorded FLOW x, y, z in cm. Segment pieces are drawn independently; gaps between modules or pieces are never connected. This visual sample is for inspection, not an efficiency measurement.</p></footer>
@@ -77,6 +82,9 @@
   let redrawPending = false;
   let rendering = false;
   let rerender = false;
+  const defaultCamera={eye:{x:1.7,y:1.1,z:-1.9},up:{x:0,y:1,z:0},center:{x:0,y:0,z:0}};
+  const motion={rotating:false,timer:null,serial:0,pending:Promise.resolve(),exporting:false,cancel:false};
+  const copy=value=>JSON.parse(JSON.stringify(value));
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   const point = value => Array.isArray(value) && value.length === 3 && value.every(finite);
   const count = value => finite(value) ? value.toLocaleString('en-US') : '—';
@@ -90,6 +98,104 @@
   const focused = () => state.data.tracks.find(track=>track.key===state.focus);
   const fail = message => { $('error').textContent=message; $('error').hidden=false; };
   const clearError = () => { $('error').hidden=true; $('error').textContent=''; };
+  const orientationText='Y upward · beam forward +Z · X transverse';
+  function currentCamera() {
+    const camera=$('main-plot').layout?.scene?.camera;
+    const result=copy(camera?.eye ? camera : defaultCamera);
+    result.up={x:0,y:1,z:0};
+    return result;
+  }
+  function orbitCamera(base,angle) {
+    const result=copy(base), eye=base.eye || defaultCamera.eye;
+    result.eye={x:eye.x*Math.cos(angle)+eye.z*Math.sin(angle),y:eye.y,z:eye.z*Math.cos(angle)-eye.x*Math.sin(angle)};
+    result.up={x:0,y:1,z:0};
+    return result;
+  }
+  function stopRotation() {
+    const wasRotating=motion.rotating;
+    motion.rotating=false;motion.serial++;
+    clearTimeout(motion.timer);motion.timer=null;
+    $('rotate-view').textContent='Autorotate';$('rotate-view').setAttribute('aria-pressed','false');
+    if(wasRotating && !motion.exporting)$('animation-status').textContent=orientationText;
+  }
+  async function startRotation() {
+    if(motion.rotating){stopRotation();return;}
+    if(state.view!=='3d' || motion.exporting || rendering)return;
+    clearError();
+    await motion.pending;
+    const base=currentCamera(), serial=++motion.serial;
+    let last=performance.now(), angle=0;
+    motion.rotating=true;$('rotate-view').textContent='Pause rotation';$('rotate-view').setAttribute('aria-pressed','true');
+    $('animation-status').textContent='Rotating about Y · one turn every 20 seconds';
+    const step=async()=>{
+      if(!motion.rotating || serial!==motion.serial)return;
+      const now=performance.now();angle+=Math.min(now-last,250)*Math.PI*2/20000;last=now;
+      try{motion.pending=Plotly.relayout($('main-plot'),{'scene.camera':orbitCamera(base,angle)});await motion.pending;}
+      catch(error){motion.pending=Promise.resolve();stopRotation();fail('Rotation stopped: '+error.message);return;}
+      if(motion.rotating && serial===motion.serial)motion.timer=setTimeout(step,40);
+    };
+    step();
+  }
+  function downloadStem() {
+    const safe=value=>String(value || 'unknown').replace(/[^A-Za-z0-9_+\-]/g,'');
+    return 'lifetime_tracks__'+safe(state.data.summary.period_start)+'_to_'+safe(state.data.summary.period_end)+'__'+safe(state.data.summary.selection)+'__page'+(state.page+1)+(state.focus ? '__'+safe(state.focus) : '');
+  }
+  async function exportRotationGIF() {
+    if(state.view!=='3d' || motion.exporting || rendering)return;
+    if(!globalThis.GIFEnc){fail('The bundled GIF encoder is missing. Regenerate this HTML with the updated exporter.');return;}
+    stopRotation();await motion.pending;
+    if(motion.exporting || rendering || state.view!=='3d')return;
+    clearError();motion.exporting=true;motion.cancel=false;
+    const plot=$('main-plot'), originalCamera=currentCamera(), originalPointerEvents=plot.style.pointerEvents;
+    const controls=[...document.querySelectorAll('main button, main input, main select')].filter(node=>node.id!=='cancel-gif');
+    const disabled=controls.map(node=>node.disabled);
+    controls.forEach(node=>{node.disabled=true;});plot.style.pointerEvents='none';
+    $('cancel-gif').hidden=false;$('cancel-gif').disabled=false;
+    const width=800,plotHeight=560,height=640,frames=48,delay=125;
+    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+    const context=canvas.getContext('2d',{willReadFrequently:true});
+    const encoder=GIFEnc.GIFEncoder();
+    const paintText=(text,y,font='13px sans-serif')=>{
+      context.font=font;context.fillStyle='#172b40';
+      let value=text;while(value.length>3 && context.measureText(value).width>width-28)value=value.slice(0,-2);
+      context.fillText(value===text ? value : value+'…',14,y);
+    };
+    try{
+      for(let frame=0;frame<frames;frame++){
+        if(motion.cancel)throw new Error('GIF_CANCELLED');
+        $('animation-status').textContent='Rendering GIF frame '+(frame+1)+' / '+frames+' (6-second loop)';
+        await Plotly.relayout(plot,{'scene.camera':orbitCamera(originalCamera,Math.PI*2*frame/frames)});
+        const url=await Plotly.toImage(plot,{format:'png',width,height:plotHeight,scale:1});
+        const image=new Image();image.src=url;await image.decode();
+        context.fillStyle='#ffffff';context.fillRect(0,0,width,height);
+        paintText('Lifetime tracks · '+state.data.summary.selection+' · page '+(state.page+1)+' · '+pageTracks().length+' parent tracks',20,'bold 14px sans-serif');
+        paintText((state.data.summary.period_start || '?')+' to '+(state.data.summary.period_end || '?')+' [start, end)',40);
+        context.drawImage(image,0,54,width,plotHeight);
+        const scaleNote=plotFrame(pageTracks()).independent ? ' · unequal axis scales' : '';
+        paintText(orientationText+' · '+(state.context ? 'rejected context shown' : 'retained segments only')+scaleNote,632,'12px sans-serif');
+        const rgba=context.getImageData(0,0,width,height).data;
+        const palette=GIFEnc.quantize(rgba,256,{format:'rgb444'});
+        const indexed=GIFEnc.applyPalette(rgba,palette,'rgb444');
+        // GIF delays have 10-ms resolution: alternate 120/130 ms for exactly 6 s.
+        encoder.writeFrame(indexed,width,height,{palette,delay:delay+(frame%2 ? 5 : -5),repeat:0});
+        await new Promise(resolve=>setTimeout(resolve,0));
+      }
+      if(motion.cancel)throw new Error('GIF_CANCELLED');
+      encoder.finish();
+      const blob=new Blob([encoder.bytes()],{type:'image/gif'}), url=URL.createObjectURL(blob);
+      const link=document.createElement('a');link.href=url;link.download=downloadStem()+'__rotation.gif';
+      document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+      $('animation-status').textContent='GIF saved · 48 frames · 6-second loop · '+orientationText;
+    }catch(error){
+      if(error.message==='GIF_CANCELLED')$('animation-status').textContent='GIF cancelled · '+orientationText;
+      else{fail('GIF export failed: '+error.message);$('animation-status').textContent='GIF export failed · '+orientationText;}
+    }finally{
+      try{await Plotly.relayout(plot,{'scene.camera':originalCamera});}catch(error){fail('Could not restore the camera: '+error.message);}
+      plot.style.pointerEvents=originalPointerEvents;controls.forEach((node,index)=>{node.disabled=disabled[index];});
+      motion.exporting=false;motion.cancel=false;$('cancel-gif').hidden=true;
+      if(rerender){rerender=false;requestRender();}
+    }
+  }
   function validate(data) {
     if (!data || data.schema_version !== 1 || !Array.isArray(data.tracks) || !data.summary || !data.sampling || !Array.isArray(data.geometries)) {
       throw new Error('This is not a track-viewer export. A pooled summary.json alone does not contain hit positions. Export it with track_viewer.py on the machine that can read the FLOW files, then open the resulting HTML or viewer JSON.');
@@ -117,6 +223,7 @@
     clearError();
     updateSummary();
     requestRender();
+    document.dispatchEvent(new CustomEvent('trackviewer:load',{detail:state.data}));
   }
   function updateSummary() {
     const s=state.data.summary, sampling=state.data.sampling;
@@ -154,7 +261,7 @@
   }
   function hover(track,segment,hit) {
     const lines=['<b>Track '+esc(track.track_id ?? track.track_row)+'</b> · event '+esc(track.event_id),esc(track.file),label(segment?.status || hit?.status)];
-    if (segment) lines.push('Segment row '+esc(segment.row)+' · IO group '+esc(segment.io_group),'Segment drift '+number(segment.t_us,3)+' µs · dQ/dx '+number(segment.dqdx,3),'dx '+number(segment.dx,3)+' cm · '+count(segment.nhits)+' hits');
+    if (segment) lines.push('Segment row '+esc(segment.row)+' · IO group '+esc(segment.io_group),'Segment drift '+number(segment.t_us,3)+' µs · dQ/ds '+number(segment.dqdx,3),'Path length '+number(segment.dx,3)+' cm · '+count(segment.nhits)+' hits');
     if (hit) {
       lines.push('Hit row '+esc(hit.row)+' · Q '+number(hit.q,3));
       if (hit.ioChannel !== undefined || hit.chip !== undefined || hit.pixel !== undefined) lines.push('Raw electronics (IO group/channel/chip/pixel): '+[hit.ioGroup,hit.ioChannel,hit.chip,hit.pixel].map(esc).join('/'));
@@ -265,7 +372,7 @@
     const {ranges,indices,independent}=frame;
     const layout={margin:{l:15,r:15,t:5,b:10},paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{family:'system-ui, sans-serif',size:12,color:'#354e63'},showlegend:false,uirevision:state.view+'-'+state.revision,hovermode:'closest'};
     if (state.view==='3d') {
-      layout.scene={aspectmode:independent ? 'cube' : 'data',xaxis:{title:{text:'X [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},yaxis:{title:{text:'Y [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},zaxis:{title:{text:'Z [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},camera:{eye:{x:1.5,y:-1.8,z:1.0}}};
+      layout.scene={aspectmode:independent ? 'cube' : 'data',xaxis:{title:{text:'X transverse [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},yaxis:{title:{text:'Y upward [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},zaxis:{title:{text:'Z beam [cm]'},gridcolor:'#e0e7ee',zerolinecolor:'#b7c5d1',showbackground:false},camera:copy(defaultCamera)};
       if (ranges) ['xaxis','yaxis','zaxis'].forEach((axis,i)=>{layout.scene[axis].range=ranges[i];layout.scene[axis].autorange=false;});
     }
     else {
@@ -323,7 +430,7 @@
     }
     const segment=track._segments.get(state.segment);
     const section=document.createElement('section');section.className='segment-detail';const title=document.createElement('h3');title.textContent=segment ? 'Segment row '+segment.row : 'Segment details';section.append(title);
-    if (segment) addFacts(section,[['Decision',label(segment.status)],['Stored ID',segment.id],['IO group',segment.io_group],['Drift time',number(segment.t_us,3)+' µs'],['dQ / dx',number(segment.dqdx,4)],['dQ',number(segment.dQ,4)],['dx',number(segment.dx,4)+' cm'],['Hits',count(segment.nhits)]]);
+    if (segment) addFacts(section,[['Decision',label(segment.status)],['Stored ID',segment.id],['IO group',segment.io_group],['Drift time',number(segment.t_us,3)+' µs'],['dQ / ds',number(segment.dqdx,4)],['dQ',number(segment.dQ,4)],['Path length ds (stored dx)',number(segment.dx,4)+' cm'],['Hits',count(segment.nhits)]]);
     else {const note=document.createElement('p');note.className='small muted';note.textContent='Click a point or segment in either plot to inspect its original row.';section.append(note);}
     target.append(section);
   }
@@ -350,6 +457,8 @@
     if (point) selectTrack(point.customdata[0],point.customdata[1]);
   }
   function requestRender() {
+    stopRotation();
+    if(motion.exporting){motion.cancel=true;rerender=true;return;}
     if (redrawPending) return;
     redrawPending=true;
     requestAnimationFrame(()=>{redrawPending=false;render();});
@@ -359,6 +468,7 @@
     if (rendering) {rerender=true;return;}
     rendering=true;
     try {
+      await motion.pending;
       const tracks=pageTracks(), range=driftRange(tracks), drawing=makeTraces(tracks,range), frame=plotFrame(tracks);
       renderTable(tracks);renderDetail();renderLegend();
       $('plot-title').textContent=tracks.length+' parent track'+(tracks.length===1 ? '' : 's')+' · '+(state.view==='3d' ? '3D overlay' : state.view.toUpperCase()+' projection');
@@ -371,13 +481,13 @@
       const scaling=frame.independent ? ' Independent axis scales keep extreme coordinates visible; apparent angles and length ratios are distorted. Use “Fit detector” for physical proportions.' : '';
       $('scale-warning').hidden=!frame.independent;
       $('plot-note').textContent=count(drawing.shownHits)+' displayed hit points · '+count(drawing.shownSegments)+' segment pieces · '+(state.context ? 'rejected context shown' : 'retained segments only')+'.'+downsample+clipping+scaling+' Click to inspect; drag to '+(state.view==='3d' ? 'rotate' : 'pan/zoom')+'.';
-      const safeName=value=>String(value || 'unknown').replace(/[^A-Za-z0-9_+\-]/g,'');
-      const stem='lifetime_tracks__'+safeName(state.data.summary.period_start)+'_to_'+safeName(state.data.summary.period_end)+'__'+safeName(state.data.summary.selection)+'__page'+(state.page+1)+(state.focus ? '__'+safeName(state.focus) : '');
+      const stem=downloadStem();
       const config={responsive:true,displaylogo:false,scrollZoom:true,toImageButtonOptions:{format:'png',filename:stem+'__'+state.view,scale:2}};
       $('main-plot').querySelector('.loading')?.remove();
       await Plotly.react('main-plot',drawing.traces,chartLayout(frame),config);
-      await Plotly.react('profile',profileTraces(tracks,range),{margin:{l:65,r:25,t:10,b:50},paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{family:'system-ui, sans-serif',size:12,color:'#354e63'},xaxis:{title:{text:'Drift time [µs]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},yaxis:{title:{text:'dQ / dx [FLOW units / cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},showlegend:false,hovermode:'closest',uirevision:'profile-'+state.page+'-'+(state.focus || '')+'-'+state.context},{...config,toImageButtonOptions:{...config.toImageButtonOptions,filename:stem+'__dqdx'}});
+      await Plotly.react('profile',profileTraces(tracks,range),{margin:{l:65,r:25,t:10,b:50},paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{family:'system-ui, sans-serif',size:12,color:'#354e63'},xaxis:{title:{text:'Drift time [µs]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},yaxis:{title:{text:'dQ / ds [FLOW units / cm]'},gridcolor:'#e5ebf1',zerolinecolor:'#bbc8d4'},showlegend:false,hovermode:'closest',uirevision:'profile-'+state.page+'-'+(state.focus || '')+'-'+state.context},{...config,toImageButtonOptions:{...config.toImageButtonOptions,filename:stem+'__dqdx'}});
       for (const id of ['main-plot','profile']) {$(id).removeAllListeners('plotly_click');$(id).on('plotly_click',plotClick);}
+      $('rotate-view').disabled=state.view!=='3d';$('save-gif').disabled=state.view!=='3d';
       document.documentElement.dataset.viewerReady='true';
     } catch (error) {fail('The display could not render: '+error.message);}
     finally {rendering=false;if(rerender){rerender=false;requestRender();}}
@@ -392,9 +502,15 @@
   [['fit-detector','detector'],['fit-all','all']].forEach(([id,extent])=>$(id).addEventListener('click',()=>{state.extent=extent;state.revision++;$('fit-detector').setAttribute('aria-pressed',String(extent==='detector'));$('fit-all').setAttribute('aria-pressed',String(extent==='all'));requestRender();}));
   $('clear-focus').addEventListener('click',()=>{state.focus=null;state.segment=null;requestRender();});
   $('load-json').addEventListener('change',async event=>{const file=event.target.files?.[0];if(!file)return;try{load(JSON.parse(await file.text()));}catch(error){fail(error.message);}event.target.value='';});
-  window.trackViewer={load,getState:()=>({page:state.page,size:state.size,view:state.view,color:state.color,context:state.context,focus:state.focus,tracks:state.data?.tracks.length || 0}),selectTrack};
+  $('rotate-view').addEventListener('click',startRotation);
+  $('save-gif').addEventListener('click',exportRotationGIF);
+  $('cancel-gif').addEventListener('click',()=>{motion.cancel=true;$('cancel-gif').disabled=true;});
+  $('main-plot').addEventListener('pointerdown',stopRotation);
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)stopRotation();});
+  window.trackViewer={load,getState:()=>({page:state.page,size:state.size,view:state.view,color:state.color,context:state.context,focus:state.focus,tracks:state.data?.tracks.length || 0,rotating:motion.rotating,exportingGIF:motion.exporting}),selectTrack};
   try {if(typeof Plotly==='undefined')throw new Error('The bundled plotting library is missing. Regenerate this HTML with track_viewer.py.');load(JSON.parse($('viewer-data').textContent));} catch(error){fail(error.message);}
 })();
 </script>
+<script>__TRACK_ANALYSIS_JS__</script>
 </body>
 </html>

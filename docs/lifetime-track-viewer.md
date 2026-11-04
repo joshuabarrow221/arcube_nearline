@@ -35,7 +35,14 @@ matching prefix. Source files are opened read-only.
 
 ## What the browser shows
 
-- Rotate and zoom the 3D view, or switch to XY, XZ, or YZ projections.
+- Rotate and zoom the 3D view, or switch to XY, XZ, or YZ projections. The
+  default camera has **Y upward, +Z forward along the beam, and X transverse**;
+  original detector coordinates are preserved.
+- Use **Autorotate** for a carousel about Y and **Save rotation GIF** for an
+  offline 48-frame, six-second loop (800 by 640 pixels). Export preserves the
+  current track page, focus, context, colors, and spatial bounds. Progress and
+  cancellation are available, and the camera is restored afterward. Animation
+  starts off, pauses on interaction, and is unavailable in 2D projections.
 - Color by parent track, segment decision, or segment drift time.
 - Toggle original hit points, independent segment pieces, and module bounds.
 - Select a parent track or click a segment/hit to inspect its event, source
@@ -43,7 +50,8 @@ matching prefix. Source files are opened read-only.
 - Inspect the selected parent's segment charge-versus-drift distribution.
 - Enable **Include rejected context** to show segments removed from those
   same parent tracks. Context points inherit a whole-segment decision; they
-  are not individually identified as noise.
+  are not individually identified as noise. This is a display switch: no cuts
+  run when it is toggled, and the saved pool does not change.
 - Read the saved **event-level quality evidence**. Those counters include
   other hits in the event and do not assign specific veto reasons to segments.
 
@@ -57,6 +65,7 @@ When extreme outliers require unequal axis scales in the all-data view, a
 visible warning states that angles and length ratios are distorted. Return to
 **Fit detector** for equal spatial scales. The plot download buttons include
 both recorded time boundaries, selection mode, page and view in PNG filenames.
+GIF filenames and frame captions also identify the acquisition window and mode.
 
 This is an overlay of different events and files. Apparent crossings do not
 imply a single physical interaction. `beam` and `cosmic` retain the upstream
@@ -90,6 +99,54 @@ Use `--max-hits-per-track 10000` for more detail, or `0` for segment geometry
 only. Nonfinite hit positions are omitted and counted separately in the JSON.
 No whole-event hit clouds are loaded or displayed, so unrelated noise elsewhere
 in an event is represented only by its saved diagnostic counters.
+
+## Rejected context and the coincidence cuts
+
+The quality policy rejects an entire stored segment if any of its member hits
+fails. Thus even an otherwise passing hit can appear in rejected context.
+The context color does not distinguish direct flags from this whole-segment
+effect. Hot-pixel and coherent-window cuts are separate tests: a segment does
+not need to look horizontal to overlap a qualifying chip/tile/module window.
+
+The **What “include rejected context” means** panel lists saved event counters
+and recorded thresholds. Counts cover unique parent events across the complete
+receipt, not just the displayed page; the same event is counted once even if
+it contains multiple parents. Different hardware scopes overlap, so their
+counts must not be summed as distinct populations. Missing historical counters
+are shown as not recorded. Individual parent details retain their saved event
+diagnostics. These records do not contain the per-hit trigger masks needed to
+assign an exact cause to every rejected segment.
+
+The default coherent test uses 50-us sliding arrival-time windows: chip
+32 hits/24 channels, tile 128 hits/96 channels/4 chips, and module readout scope
+512 hits/384 channels/4 tiles. Each also requires distinct-pixel transverse
+minor RMS of at least 0.5 cm. These provisional occupancy tests can flag a real
+track or shower, or reject a track overlapping other activity; their signal
+efficiency has not been calibrated. See the recorded configuration and
+[quality-cut documentation](lifetime-track-quality.md) for the actual policy.
+
+## Charge scale at zero drift
+
+The parent-track scatter is **dQ/ds**, where ds is stored segment path length
+(`dx`), not detector X displacement. A separate **Full-pool charge scale at
+zero drift** panel uses every retained pooled segment, independently of the
+sampled track page or focus. Its **Direct dQ/ds** tab fits Landau–Gaussian MPVs
+in drift-time bins, then `A exp(-t/tau)`. Accepted fits show A at zero, its
+conditional uncertainty, the exponential, and a dashed extrapolation from the
+first fitted bin down to zero.
+
+The **Saved lifetime proxy** tab instead displays the existing accepted
+lifetime model's amplitude and covariance. That estimator fits a histogram
+convolution proxy; its amplitude is not raw dQ/ds and is never overlaid on the
+raw-charge scatter. The direct diagnostic does not replace the saved lifetime.
+Failed fits retain available MPVs and their failure message without an
+accepted intercept or curve. This includes failed saved lifetime fits.
+
+The direct diagnostic runs during export, not in the browser. Use
+`--skip-direct-charge-fit` to omit it. Neither fitted uncertainty includes
+detector/selection systematics or correlations among segments of the same
+track. Details, acceptance criteria, and a CLI to compare multiple six-hour
+windows are in the [charge-scale guide](lifetime-charge-scale.md).
 
 ## Provenance and limits
 

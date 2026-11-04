@@ -3,7 +3,8 @@
 
 The summary is an index, not a hit store. Run this beside the original FLOW,
 selection sidecars, and pooled segments on NERSC, then copy the HTML anywhere.
-No fits or quality cuts are rerun. All source files are opened read-only.
+Saved lifetime fits and cuts are unchanged. A separate full-pool direct dQ/ds
+charge-scale diagnostic runs unless disabled. Source files are read-only.
 """
 import argparse
 from contextlib import ExitStack
@@ -187,6 +188,39 @@ def _verify_pool(summary, inventories, receipt, path_maps):
     return str(path)
 
 
+def _quality_evidence(inventories):
+    """Summarize saved event flags, not invented per-hit or per-segment causes."""
+    events = {}
+    totals = dict(n_source_segments=0, n_retained=0, n_quality_rejected=0, n_invalid=0)
+    for inv in inventories:
+        for layout in inv['layouts'].values():
+            status = layout['status']
+            totals['n_source_segments'] += len(status)
+            for field, label in [('n_retained', 'retained'), ('n_quality_rejected', 'quality_rejected'), ('n_invalid', 'invalid')]:
+                totals[field] += int(np.sum(status == label))
+        for row in inv['diagnostics']:
+            # One event can have several parent tracks / source layouts. Its
+            # electronics evidence must not receive one weight per track.
+            events.setdefault((inv['index'], row.get('event_row')), row)
+    fields = ('hot_pixel_hits', 'coherent_noise_hits', 'ambiguous_clock_hits',
+              'invalid_hits', 'n_outside_module_hits', 'n_unmapped_hits')
+    counts, coverage = {}, {}
+    for field in fields:
+        values = [row[field] for row in events.values() if row.get(field) is not None]
+        counts[field] = sum(values) if values else None
+        coverage[field] = len(values)
+    groups = {}
+    for scope in ('chip', 'tile', 'module'):
+        values = [row['burst_groups_flagged'][scope] for row in events.values()
+                  if row.get('burst_groups_flagged', {}).get(scope) is not None]
+        groups[scope] = sum(values) if values else None
+    return dict(available=bool(events), n_events=len(events), versions=sorted({row.get('version', 'unknown') for row in events.values()}),
+        counters=counts, counter_event_coverage=coverage, burst_groups_flagged=groups, **totals,
+        scope='unique recorded parent events across all receipt members, not just the displayed track sample',
+        attribution='saved event-level flags; exact per-segment and per-hit trigger masks were not persisted',
+        policy='one rejected member hit vetoes the entire segment; context displays its exported hits and pieces')
+
+
 def _xyz(row, suffix):
     names = [f'{axis}_{suffix}' for axis in 'xyz']
     if not set(names) <= set(row.dtype.names or ()):
@@ -297,7 +331,7 @@ def _track_payload(inv, name, track_row, max_hits, seed, source):
         nonfinite_display_hits_omitted=nonfinite_hits)
 
 
-def build_payload(summary_path, max_tracks=100, seed=0, population='retained', max_hits_per_track=2000, path_maps=()):
+def build_payload(summary_path, max_tracks=100, seed=0, population='retained', max_hits_per_track=2000, path_maps=(), fit_charge=True):
     """Uniform deterministic parent sampling after verifying saved pool lineage."""
     if not 1 <= max_tracks <= 1000 or not 0 <= max_hits_per_track <= 100000:
         raise ValueError('max_tracks must be 1..1000 and max_hits_per_track 0..100000')
@@ -317,6 +351,13 @@ def build_payload(summary_path, max_tracks=100, seed=0, population='retained', m
         inventories.append(_member_inventory(member, i, mode, receipt, path_maps))
         print(f"Verified {i + 1}/{len(summary['members'])}: {Path(member['input_file']).name}", file=sys.stderr, flush=True)
     pooled_path = _verify_pool(summary, inventories, receipt, path_maps)
+    from charge_scale import charge_scale_payload
+    tick_periods = {inv['tick_us'] for inv in inventories}
+    with h5py.File(pooled_path, 'r') as pool:
+        full_pool = pool[POOL + '/data'][:] if fit_charge and len(tick_periods) == 1 else None
+    charge_scale = charge_scale_payload(summary, full_pool, tick_us=inventories[0]['tick_us'])
+    if fit_charge and len(tick_periods) != 1:
+        charge_scale['direct']['fit_message'] = 'Direct diagnostic unavailable: source files have different drift tick periods.'
     candidates, total = [], 0
     for inv in inventories:
         for name, layout in inv['layouts'].items():
@@ -349,6 +390,7 @@ def build_payload(summary_path, max_tracks=100, seed=0, population='retained', m
         sampling=dict(seed=seed, total_parent_tracks=total, eligible_parent_tracks=len(candidates),
             exported_tracks=len(tracks), population=population, max_hits_per_track=max_hits_per_track,
             method='uniform parent-track sample without replacement; uniform referenced-hit display subsample'),
+        quality_evidence=_quality_evidence(inventories), charge_scale=charge_scale,
         geometries=[inv['geometry'] for inv in inventories if any(t['member_index'] == inv['index'] for t in tracks)],
         tracks=tracks))
 
@@ -363,7 +405,9 @@ def write_viewer(payload, output, json_output=None):
     safe = encoded.replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e').replace('\u2028', '\\u2028').replace('\u2029', '\\u2029')
     template = Path(__file__).with_suffix('.html').read_text()
     # Replace the data last: user strings must never be interpreted as template tokens.
-    html = template.replace('__PLOTLY_JS__', get_plotlyjs()).replace('__TRACK_VIEWER_DATA__', safe)
+    gif_encoder = Path(__file__).parent / 'vendor' / 'gifenc-1.0.3.js'
+    analysis_js = Path(__file__).with_name('track_viewer_analysis.js').read_text()
+    html = template.replace('__PLOTLY_JS__', get_plotlyjs()).replace('__GIF_ENCODER_JS__', gif_encoder.read_text()).replace('__TRACK_ANALYSIS_JS__', analysis_js).replace('__TRACK_VIEWER_DATA__', safe)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html, encoding='utf-8')
     if json_output:
@@ -382,6 +426,7 @@ def main(argv=None):
     parser.add_argument('--max-hits-per-track', type=int, default=2000, help='display hit cap per parent; 0 exports segment geometry only')
     parser.add_argument('--population', choices=('retained', 'rejected', 'all'), default='retained', help='retained: >=1 pooled segment; rejected: no retained and >=1 quality-vetoed; all: original parents')
     parser.add_argument('--seed', type=int, default=0, help='deterministic parent/hit display sampling seed')
+    parser.add_argument('--skip-direct-charge-fit', action='store_true', help='export saved proxy fit only; skip the independent full-pool dQ/ds fit')
     parser.add_argument('--path-map', action='append', default=[], metavar='OLD=NEW', help='replace a recorded file-path prefix; repeatable')
     args = parser.parse_args(argv)
     try:
@@ -397,7 +442,7 @@ def main(argv=None):
             raise ValueError('output paths must be distinct from every input summary, FLOW, sidecar and pool file')
         if args.json_output and args.json_output.suffix.lower() != '.json':
             raise ValueError('--json-output must end in .json')
-        payload = build_payload(args.summary, args.max_tracks, args.seed, args.population, args.max_hits_per_track, args.path_map)
+        payload = build_payload(args.summary, args.max_tracks, args.seed, args.population, args.max_hits_per_track, args.path_map, not args.skip_direct_charge_fit)
         result = write_viewer(payload, args.output, args.json_output)
     except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
         parser.exit(2, f'Track viewer export failed: {exc}\n')

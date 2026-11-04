@@ -303,6 +303,46 @@ def test_html_embedding_cannot_close_script_and_export_is_self_contained(tmp_pat
     html = output.read_text()
     assert marker not in html
     assert '__TRACK_VIEWER_DATA__' not in html and '__PLOTLY_JS__' not in html
+    assert '__GIF_ENCODER_JS__' not in html and '__TRACK_ANALYSIS_JS__' not in html
     assert 'window.viewer_injected=true' in html
     assert json.loads(json_output.read_text())['summary']['fit_message'] == marker
     assert '<script src=' not in html.lower()
+
+
+def test_charge_and_quality_evidence_do_not_depend_on_display_sample(tmp_path):
+    path, _ = make_receipt(tmp_path, n_files=2)
+    one = viewer.build_payload(path, max_tracks=1, seed=7, max_hits_per_track=0)
+    all_tracks = viewer.build_payload(path, max_tracks=100, population='all')
+    assert len(one['tracks']) == 1 and len(all_tracks['tracks']) == 4
+    assert one['charge_scale'] == all_tracks['charge_scale']
+    assert one['charge_scale']['direct']['n_segments'] == 4
+    assert one['quality_evidence'] == all_tracks['quality_evidence']
+    assert one['quality_evidence']['n_quality_rejected'] == 2
+    skipped = viewer.build_payload(path, fit_charge=False)
+    assert skipped['charge_scale']['direct']['status'] == 'unavailable'
+    assert skipped['charge_scale']['direct']['intercept'] is None
+
+
+def test_event_evidence_is_not_weighted_by_parent_multiplicity():
+    event = dict(event_row=4, hot_pixel_hits=0, coherent_noise_hits=100,
+                 version='archived', ambiguous_clock_hits=None,
+                 burst_groups_flagged=dict(chip=2, tile=1, module=0))
+    inventories = [dict(index=0, layouts={}, diagnostics=[event, event.copy()]),
+                   dict(index=1, layouts={}, diagnostics=[event.copy()])]
+    evidence = viewer._quality_evidence(inventories)
+    assert evidence['n_events'] == 2  # File-local event rows remain distinct.
+    assert evidence['counters']['coherent_noise_hits'] == 200
+    assert evidence['burst_groups_flagged'] == dict(chip=4, tile=2, module=0)
+    assert evidence['counters']['hot_pixel_hits'] == 0
+    assert evidence['counters']['ambiguous_clock_hits'] is None
+    assert evidence['counters']['n_unmapped_hits'] is None
+
+
+def test_mixed_tick_periods_do_not_get_a_single_conversion_in_direct_fit(tmp_path):
+    path, receipt = make_receipt(tmp_path, n_files=2)
+    with h5py.File(receipt['members'][1]['input_file'], 'r+') as flow:
+        flow['run_info'].attrs['crs_ticks'] = .2
+    payload = viewer.build_payload(path)
+    assert payload['charge_scale']['direct']['status'] == 'unavailable'
+    assert 'different drift tick' in payload['charge_scale']['direct']['fit_message']
+    assert len(payload['tracks']) == 4
