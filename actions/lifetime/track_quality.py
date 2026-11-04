@@ -180,10 +180,29 @@ def _burst_mask(times, pixel_labels, group_labels, subunit_labels,
     Distinct-channel coordinate moments avoid letting one repeating pixel
     dominate the spatial test. Counts and moments update in linear time after
     sorting. A difference array marks union membership without a quadratic
-    number of slice writes for continuously firing electronics.
+    number of slice writes for continuously firing electronics. Eigenvalues
+    are evaluated in bounded batches, keeping the original moment update
+    order and covariance arithmetic without one LAPACK dispatch per hit.
     """
     rejected = np.zeros(len(times), dtype=bool)
     flagged_groups, maximum_channels = 0, 0
+    pixel_outer = pixel_coordinates[:, :, None] * pixel_coordinates[:, None, :]
+    batch_size = 1024
+    sums = np.empty((batch_size, 2), dtype='f8')
+    outers = np.empty((batch_size, 2, 2), dtype='f8')
+    sizes = np.empty(batch_size, dtype='i8')
+    starts = np.empty(batch_size, dtype='i8')
+    stops = np.empty(batch_size, dtype='i8')
+
+    def mark_windows(count, coverage):
+        mean = sums[:count] / sizes[:count, None]
+        covariance = (outers[:count] / sizes[:count, None, None]
+                      - mean[:, :, None] * mean[:, None, :])
+        passing = np.linalg.eigvalsh(covariance)[:, 0] >= config.burst_min_transverse_rms_cm ** 2
+        # Starts are unique, but many nested windows can have the same stop.
+        coverage[starts[:count][passing]] += 1
+        np.add.at(coverage, stops[:count][passing], -1)
+
     for indices in _groups(group_labels):
         if len(indices) < min_hits:
             continue
@@ -194,36 +213,40 @@ def _burst_mask(times, pixel_labels, group_labels, subunit_labels,
         pixel_counts, subunit_counts = {}, {}
         coord_sum, coord_outer = np.zeros(2), np.zeros((2, 2))
         coverage = np.zeros(len(indices) + 1, dtype=np.int64)
-        right = 0
+        right, pending = 0, 0
         for left in range(len(indices)):
             while right < len(indices) and local_time[right] - local_time[left] <= config.window_us:
                 pixel, subunit = int(pixels[right]), int(subunits[right])
                 if pixel not in pixel_counts:
                     coordinate = pixel_coordinates[pixel]
                     coord_sum += coordinate
-                    coord_outer += np.outer(coordinate, coordinate)
+                    coord_outer += pixel_outer[pixel]
                 pixel_counts[pixel] = pixel_counts.get(pixel, 0) + 1
                 subunit_counts[subunit] = subunit_counts.get(subunit, 0) + 1
                 right += 1
             channels = len(pixel_counts)
             maximum_channels = max(maximum_channels, channels)
             if right - left >= min_hits and channels >= min_channels and len(subunit_counts) >= min_subunits:
-                mean = coord_sum / channels
-                covariance = coord_outer / channels - np.outer(mean, mean)
-                minor_variance = float(np.linalg.eigvalsh(covariance)[0])
-                if minor_variance >= config.burst_min_transverse_rms_cm ** 2:
-                    coverage[left] += 1
-                    coverage[right] -= 1
+                sums[pending] = coord_sum
+                outers[pending] = coord_outer
+                sizes[pending] = channels
+                starts[pending], stops[pending] = left, right
+                pending += 1
+                if pending == batch_size:
+                    mark_windows(pending, coverage)
+                    pending = 0
             pixel, subunit = int(pixels[left]), int(subunits[left])
             pixel_counts[pixel] -= 1
             if pixel_counts[pixel] == 0:
                 del pixel_counts[pixel]
                 coordinate = pixel_coordinates[pixel]
                 coord_sum -= coordinate
-                coord_outer -= np.outer(coordinate, coordinate)
+                coord_outer -= pixel_outer[pixel]
             subunit_counts[subunit] -= 1
             if subunit_counts[subunit] == 0:
                 del subunit_counts[subunit]
+        if pending:
+            mark_windows(pending, coverage)
         local_bad = np.cumsum(coverage[:-1]) > 0
         if local_bad.any():
             flagged_groups += 1

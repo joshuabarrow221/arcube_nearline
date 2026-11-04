@@ -147,6 +147,47 @@ def _settings(source, path):
         for location, node in [('group', source[path]), ('data', source[path + '/data'])]}
 
 
+def _evaluate_event_segments(hits, event_hits_ref, region, event_row, context,
+                             segments, segment_rows, links, offsets):
+    """Return small segment decisions; no hit array/view survives this call.
+
+    In particular, retaining ``event_hits['io_group']`` would retain the entire
+    structured event array through its NumPy base pointer. Evaluate one event,
+    including its non-track hits, then release all event-sized working arrays.
+    """
+    start, stop = int(region['start']), int(region['stop'])
+    if start < 0 or stop < start or stop > len(event_hits_ref):
+        raise ValueError('invalid event-to-hit reference region')
+    event_links = event_hits_ref[start:stop]
+    hit_rows = event_links[event_links[:, 0] == event_row, 1].astype('i8', copy=False)
+    del event_links
+    hit_rows.sort()
+    if (np.any(hit_rows < 0) or np.any(hit_rows >= len(hits))
+            or np.any(hit_rows[1:] == hit_rows[:-1])):
+        raise ValueError('invalid or duplicate event-to-hit reference')
+    # FLOW usually stores an event contiguously. These rows are already sorted
+    # and unique; a direct slice avoids take() sorting them again and making
+    # a second full hit-array copy. Keep its general path for scattered refs.
+    if len(hit_rows) and hit_rows[-1] - hit_rows[0] + 1 == len(hit_rows):
+        event_hits = hits[hit_rows[0]:hit_rows[-1] + 1]
+    else:
+        event_hits = take(hits, hit_rows)
+    hit_keep, diagnostics = context.evaluate(event_hits)
+    hit_groups = event_hits['io_group']
+    keep = np.ones(len(segment_rows), dtype=bool)
+    for index, segment_row in enumerate(segment_rows):
+        members = links[offsets[segment_row]:offsets[segment_row + 1], 1]
+        positions = np.searchsorted(hit_rows, members)
+        if (np.any(positions >= len(hit_rows)) or
+                not np.array_equal(hit_rows[positions], members)):
+            raise ValueError('segment hit lies outside its parent event references')
+        if ('io_group' in segments.dtype.names and
+                np.any(hit_groups[positions] != segments[segment_row]['io_group'])):
+            raise ValueError('segment io_group disagrees with its hit references')
+        keep[index] = bool(np.all(hit_keep[positions]))
+    return keep, diagnostics
+
+
 def select_stored_muons(input_file, output_file, quality_config=None):
     """Copy clean stored segments to a complete, separate timing-split sidecar.
 
@@ -179,9 +220,8 @@ def select_stored_muons(input_file, output_file, quality_config=None):
         else:
             raise ValueError('FLOW has no stored muon segments')
         selector_settings, output_dtype = {}, None
-        # Cache only event masks shared across split selections; a stored segment
-        # carries far fewer rows than the complete FLOW hit collection.
-        event_cache = {}
+        # Beam and cosmic layouts cannot share an event with consistent trigger
+        # categories. No event cache is needed across these disjoint layouts.
         for segment_path, declared_sample in layouts:
             track_path = segment_path.replace('_segments', '_tracks')
             if track_path + '/data' not in source:
@@ -200,53 +240,38 @@ def select_stored_muons(input_file, output_file, quality_config=None):
             for track_row, event_row in enumerate(parent_events):
                 if int(tracks[track_row]['event_id']) != int(event_lookup[int(event_row)]['id']):
                     raise ValueError('stored track event_id disagrees with event reference')
-            links = _reference(source, segment_path, HITS)[:].astype('i8')
+            links = _reference(source, segment_path, HITS)[:].astype('i8', copy=False)
             if (np.any(links < 0) or np.any(links[:, 0] >= len(segments))
                     or np.any(links[:, 1] >= len(hits))):
                 raise ValueError('invalid segment-to-hit reference')
-            if len(np.unique(links, axis=0)) != len(links):
+            # One lexicographic ordering both detects duplicate associations
+            # and groups each segment's hit membership, replacing two sorts.
+            links = links[np.lexsort((links[:, 1], links[:, 0]))]
+            if np.any(np.all(links[1:] == links[:-1], axis=1)):
                 raise ValueError('duplicate segment-to-hit reference')
             counts = np.bincount(links[:, 0], minlength=len(segments))
             if not np.array_equal(counts, segments['nhits']) or np.any(counts == 0):
                 raise ValueError('stored segment nhits disagrees with complete hit references')
-            order = np.argsort(links[:, 0], kind='stable')
-            links = links[order]
             offsets = np.r_[0, np.cumsum(counts)]
+            # Group once instead of scanning every segment for every event.
+            segment_events = parent_events[parent_tracks]
+            segment_order = np.argsort(segment_events, kind='stable')
+            ordered_events = segment_events[segment_order]
+            event_starts = np.searchsorted(ordered_events, event_rows, side='left')
+            event_stops = np.searchsorted(ordered_events, event_rows, side='right')
             keep = np.ones(len(segments), dtype=bool)
             samples = np.empty(len(segments), dtype='U6')
-            for event_row in event_rows:
+            for event_row, first, last in zip(event_rows, event_starts, event_stops):
                 event_row = int(event_row)
                 event = event_lookup[event_row]
                 sample = 'beam' if event['n_ext_trigs'] > 0 else 'cosmic'
                 if declared_sample is not None and sample != declared_sample:
                     raise ValueError('stored timing selection disagrees with parent trigger category')
-                if event_row not in event_cache:
-                    region = regions[event_row]
-                    start, stop = int(region['start']), int(region['stop'])
-                    if start < 0 or stop < start or stop > len(event_hits_ref):
-                        raise ValueError('invalid event-to-hit reference region')
-                    event_links = event_hits_ref[start:stop]
-                    hit_rows = event_links[event_links[:, 0] == event_row, 1].astype('i8')
-                    if (np.any(hit_rows < 0) or np.any(hit_rows >= len(hits))
-                            or len(np.unique(hit_rows)) != len(hit_rows)):
-                        raise ValueError('invalid or duplicate event-to-hit reference')
-                    hit_rows.sort()
-                    event_hits = take(hits, hit_rows)
-                    hit_keep, diagnostics = context.evaluate(event_hits)
-                    event_cache[event_row] = (hit_rows, hit_keep, event_hits['io_group'], diagnostics)
-                hit_rows, hit_keep, hit_groups, diagnostics = event_cache[event_row]
-                segment_rows = np.flatnonzero(parent_events[parent_tracks] == event_row)
+                segment_rows = segment_order[first:last]
                 samples[segment_rows] = sample
-                for segment_row in segment_rows:
-                    members = links[offsets[segment_row]:offsets[segment_row + 1], 1]
-                    positions = np.searchsorted(hit_rows, members)
-                    if (np.any(positions >= len(hit_rows)) or
-                            not np.array_equal(hit_rows[positions], members)):
-                        raise ValueError('segment hit lies outside its parent event references')
-                    if ('io_group' in segments.dtype.names and
-                            np.any(hit_groups[positions] != segments[segment_row]['io_group'])):
-                        raise ValueError('segment io_group disagrees with its hit references')
-                    keep[segment_row] = bool(np.all(hit_keep[positions]))
+                keep[segment_rows], diagnostics = _evaluate_event_segments(
+                    hits, event_hits_ref, regions[event_row], event_row, context,
+                    segments, segment_rows, links, offsets)
                 audits.append(dict(diagnostics, event_row=event_row, event_id=int(event['id']),
                     source_segments=segment_path, n_segments=len(segment_rows),
                     n_kept_segments=int(keep[segment_rows].sum())))

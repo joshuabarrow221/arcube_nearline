@@ -9,6 +9,56 @@ efficiency, noise rejection on detector data, or an unbiased lifetime.
 See [the rolling CLI guide](lifetime-recent-tracks.md) for commands, acquisition
 time windows, output provenance, and fit results.
 
+## Memory and runtime
+
+Stored quality selection processes one parent event at a time. Full event-hit
+buffers are released after their segment decisions are recorded. Multiple
+parents in the same event share that evaluation. The original event context,
+including hits outside the tracks, is still included in the noise tests.
+
+An earlier implementation cached the `io_group` column of every processed
+event. That NumPy field view kept the **entire structured hit array** alive,
+causing memory to accumulate until the file finished. Removing the cache fixes
+that retention; calling `gc.collect()` cannot free arrays still referenced by
+a live view. Python/NumPy allocators may retain freed pages for reuse, so OS RSS
+need not fall immediately even when the objects have been released.
+
+The adapter groups segment rows by event once, sorts segment-hit references
+once for duplicate checking and grouping, and directly slices contiguous event
+hit rows. Scattered references retain the general reader. Coherent-window
+covariance tests run in bounded batches of 1,024 windows, with the same moment
+update order, cuts, and clock handling. These optimizations do not relax vetoes
+or change retained segment charge, path length, drift time, or lineage.
+
+Memory still scales with the **largest individual event**, stored reference
+tables, and pooled segment output. A single huge event can require substantial
+working memory. More parallel workers would multiply those requirements;
+parallelism is not a substitute for controlling buffer lifetime.
+
+Finish or stop the current Python invocation before updating its checkout,
+then start a fresh invocation. Imported functions do not hot-reload, while
+provenance hashes are read from source files during processing. The updated
+code gets new implementation hashes even though the cut configuration is
+unchanged; use fresh sidecars for a new pooled run.
+
+To measure a particular FLOW file independently of pooling or lifetime fitting,
+activate the analysis environment, set `quality_flow` to its full path, and run
+from the repository root:
+
+```bash
+quality_profile_dir=$(mktemp -d "${SCRATCH:-/tmp}/purity-quality-profile.XXXXXX")
+/usr/bin/time -v python3 -c \
+  'import sys; sys.path.insert(0, "actions/lifetime"); from stored_quality import select_stored_muons; select_stored_muons(sys.argv[1], sys.argv[2])' \
+  "$quality_flow" "$quality_profile_dir/segments.h5" \
+  2> "$quality_profile_dir/time.txt"
+cat "$quality_profile_dir/time.txt"
+```
+
+This uses the default quality configuration and writes only a new sidecar.
+GNU time reports elapsed time and maximum resident set size (KiB on NERSC),
+which is a high-water mark rather than the current memory footprint. Compare
+the same file, configuration, and CPU allocation across code revisions.
+
 ## Selection modes
 
 `recent_tracks.py --selection quality-stored` is the default. It follows the

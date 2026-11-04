@@ -3,13 +3,14 @@ from pathlib import Path
 import hashlib
 import json
 import sys
+import weakref
 
 import h5py
 import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'actions/lifetime'))
-from stored_quality import build_quality_context, select_stored_muons
+from stored_quality import QualityContext, build_quality_context, select_stored_muons
 
 
 HIT_DTYPE = [(name, 'f8') for name in ('x', 'y', 'z', 'Q', 'E', 'ts_pps', 't_drift')]
@@ -210,3 +211,97 @@ def test_explicit_split_selection_retains_original_rows_and_categories(tmp_path)
         np.testing.assert_array_equal(h['analysis/cosmic_muon_segments/data'][:], original[[2]])
         assert list(h['analysis/cosmic_muon_segments/source_row'][:]) == [1]
         assert h['analysis/cosmic_muon_segments/source_dataset'].asstr()[0] == 'analysis/cosmic_muon_segments'
+
+
+@pytest.mark.parametrize('split', [False, True])
+def test_event_hit_buffers_are_released_before_reading_next_event(tmp_path, monkeypatch, split):
+    """A field view must not retain every previous event's structured hit array."""
+    source, output = tmp_path / 'source.h5', tmp_path / 'selected.h5'
+    original = fixture_flow(source)
+    if split:
+        with h5py.File(source, 'r+') as h:
+            for sample, event_row, event_id, selected, memberships in [
+                ('beam_rock_muon', 1, 7, [0], [[0, 13], [0, 14]]),
+                ('cosmic_muon', 0, 42, [1, 2], [[0, 0], [0, 1], [1, 12]]),
+            ]:
+                track, segment = f'analysis/{sample}_tracks', f'analysis/{sample}_segments'
+                h.create_dataset(track + '/data', data=np.array([(event_id,)], dtype=[('event_id', 'i8')]))
+                h.create_dataset(segment + '/data', data=original[selected])
+                reference(h, 'charge/events', track, [[event_row, 0]])
+                reference(h, track, segment, [[0, i] for i in range(len(selected))])
+                reference(h, segment, 'charge/calib_prompt_hits', memberships)
+
+    evaluate = QualityContext.evaluate
+    previous_arrays, event_sizes = [], []
+
+    def tracked_evaluate(context, hits):
+        # Reachability directly tests retention, independently of allocator/RSS
+        # behavior and without depending on the event-cache implementation.
+        assert all(reference() is None for reference in previous_arrays)
+        previous_arrays.append(weakref.ref(hits))
+        event_sizes.append(len(hits))
+        return evaluate(context, hits)
+
+    monkeypatch.setattr(QualityContext, 'evaluate', tracked_evaluate)
+    select_stored_muons(source, output)
+    assert sorted(event_sizes) == [3, 13]
+    assert all(reference() is None for reference in previous_arrays)
+    with h5py.File(output, 'r') as result:
+        np.testing.assert_array_equal(result['analysis/beam_rock_muon_segments/data'][:], original[[0]])
+        np.testing.assert_array_equal(result['analysis/cosmic_muon_segments/data'][:], original[[2]])
+
+
+def test_multiple_parents_share_one_full_event_evaluation(tmp_path, monkeypatch):
+    source, output = tmp_path / 'source.h5', tmp_path / 'selected.h5'
+    original = fixture_flow(source)
+    with h5py.File(source, 'r+') as h:
+        tracks = 'analysis/rock_muon_tracks'
+        segments = 'analysis/rock_muon_segments'
+        del h[tracks + '/data']
+        # Event 42 now has two parents; event 7 also has an empty parent.
+        h.create_dataset(tracks + '/data', data=np.array([(7,), (42,), (42,), (7,)],
+            dtype=[('event_id', 'i8')]))
+        del h[f'charge/events/ref/{tracks}/ref']
+        del h[f'{tracks}/ref/{segments}/ref']
+        reference(h, 'charge/events', tracks, [[0, 2], [1, 0], [1, 3], [0, 1]])
+        reference(h, tracks, segments, [[2, 2], [0, 0], [1, 1]])
+    evaluate = QualityContext.evaluate
+    sizes = []
+
+    def counted_evaluate(context, hits):
+        sizes.append(len(hits))
+        return evaluate(context, hits)
+
+    monkeypatch.setattr(QualityContext, 'evaluate', counted_evaluate)
+    select_stored_muons(source, output)
+    assert sorted(sizes) == [3, 13]
+    with h5py.File(output, 'r') as result:
+        np.testing.assert_array_equal(result['analysis/cosmic_muon_segments/data'][:], original[[2]])
+        audits = [json.loads(row) for row in result['quality/events/diagnostics'].asstr()[:]]
+        assert len(audits) == 2
+        noisy = next(row for row in audits if row['event_id'] == 42)
+        # Both parent tracks see the other ten unselected hot-pixel hits.
+        assert noisy['hot_pixel_hits'] == 12
+        assert noisy['n_segments'] == 2 and noisy['n_kept_segments'] == 1
+        assert result['analysis/cosmic_muon_segments'].attrs['selected_track_count'] == 1
+
+
+def test_scattered_event_hit_rows_preserve_quality_and_segment_values(tmp_path):
+    source, output = tmp_path / 'source.h5', tmp_path / 'selected.h5'
+    original = fixture_flow(source)
+    permutation = np.array([0, 13, 1, 14, 2, 15, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+    inverse = np.argsort(permutation)
+    with h5py.File(source, 'r+') as h:
+        hits = h['charge/calib_prompt_hits/data'][:]
+        h['charge/calib_prompt_hits/data'][:] = hits[permutation]
+        for parent in ('charge/events', 'analysis/rock_muon_segments'):
+            node = h[parent + '/ref/charge/calib_prompt_hits/ref']
+            refs = node[:]
+            refs[:, 1] = inverse[refs[:, 1]]
+            node[:] = refs
+    select_stored_muons(source, output)
+    with h5py.File(output, 'r') as h:
+        np.testing.assert_array_equal(h['analysis/beam_rock_muon_segments/data'][:], original[[0]])
+        np.testing.assert_array_equal(h['analysis/cosmic_muon_segments/data'][:], original[[2]])
+        audits = [json.loads(row) for row in h['quality/events/diagnostics'].asstr()[:]]
+        assert next(row for row in audits if row['event_id'] == 42)['hot_pixel_hits'] == 12

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'actions/lifetime'))
-from track_quality import TrackQualityConfig, quality_hit_mask
+from track_quality import TrackQualityConfig, quality_hit_mask, _burst_mask
 
 
 DTYPE = [(name, 'f8') for name in ('x', 'y', 'z', 'ts_pps', 't_drift')] + [
@@ -214,3 +214,53 @@ def test_exact_half_period_is_ambiguous_and_rollover_burst_survives_elsewhere():
 def test_invalid_config_rejected(kwargs):
     with pytest.raises(ValueError):
         TrackQualityConfig(**kwargs)
+
+
+@pytest.mark.parametrize('arrival_pattern', ['coincident', 'sliding'])
+def test_batched_burst_windows_match_independent_window_enumeration(arrival_pattern):
+    """Cross the batch boundary, including many windows sharing one stop."""
+    count = 1350
+    rng = np.random.default_rng(20261104)
+    pixels = rng.integers(0, 64, count)
+    coordinates = np.column_stack((np.arange(64) % 8, np.arange(64) // 8)).astype(float)
+    times = np.zeros(count) if arrival_pattern == 'coincident' else np.arange(count) * .1
+    permutation = rng.permutation(count)
+    times, pixels = times[permutation], pixels[permutation]
+    groups = np.zeros(count, dtype='i8')
+    subunits = pixels // 16
+    config = replace(TrackQualityConfig(), window_us=50.)
+    expected = np.zeros(count, dtype=bool)
+    maximum = 0
+    ordered = np.argsort(times, kind='stable')
+    for left in range(count):
+        window = ordered[left:][times[ordered[left:]] <= times[ordered[left]] + config.window_us]
+        unique = np.unique(pixels[window])
+        maximum = max(maximum, len(unique))
+        if len(window) < 32 or len(unique) < 24 or len(np.unique(subunits[window])) < 3:
+            continue
+        xy = coordinates[unique]
+        mean = xy.mean(axis=0)
+        covariance = (xy[:, :, None] * xy[:, None, :]).mean(axis=0) - np.outer(mean, mean)
+        if np.linalg.eigvalsh(covariance)[0] >= config.burst_min_transverse_rms_cm ** 2:
+            expected[window] = True
+    actual, flagged_groups, actual_maximum = _burst_mask(
+        times, pixels, groups, subunits, coordinates, 32, 24, 3, config)
+    assert np.array_equal(actual, expected)
+    assert flagged_groups == int(expected.any())
+    assert actual_maximum == maximum
+
+
+@pytest.mark.parametrize('threshold', [np.nextafter(.5, 0.), .5, np.nextafter(.5, 1.)])
+def test_batched_burst_rms_boundary_remains_inclusive(threshold):
+    # Exact binary coordinates give minor variance exactly 0.25. Repeated
+    # windows exercise both full batches and the partial trailing batch.
+    coordinates = np.array([[-1., -.5], [-1., .5], [1., -.5], [1., .5]])
+    pixels = np.tile(np.arange(4), 300)
+    times = np.zeros(len(pixels))
+    config = replace(TrackQualityConfig(), burst_min_transverse_rms_cm=threshold)
+    mask, groups, maximum = _burst_mask(times, pixels, np.zeros(len(pixels)),
+        pixels, coordinates, 4, 4, 4, config)
+    assert mask.all() == (threshold <= .5)
+    assert mask.any() == (threshold <= .5)
+    assert groups == int(threshold <= .5)
+    assert maximum == 4
