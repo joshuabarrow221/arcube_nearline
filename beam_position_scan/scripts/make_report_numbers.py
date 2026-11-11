@@ -164,3 +164,49 @@ m2("BRfiles", len(br.get("args", {}).get("flashes", [])), "{}")
 with open(Path(__file__).resolve().parents[1] / "report" / "numbers.tex", "a") as fh:
     fh.write("\n".join(lines) + "\n")
 print("\n".join(lines))
+
+# --- MINERvA (Mx2) track-like slices and 2x2-Mx2 coincidences ---------------
+R = Path(__file__).resolve().parents[1] / "results"
+lines = []
+
+
+def jload(p):
+    try:
+        return json.loads((R / p).read_text())
+    except Exception:
+        return {}
+
+
+for tag, key in (("trk", "MXtrk"), ("all", "MXall"), ("long", "MXlong")):
+    d = jload(f"batch_rates_mx2_{tag}/batch_rates.json")
+    r = d.get("batch1_over_rest", {})
+    fbm = d.get("follower_bias", {})
+    fr = d.get("flash_rates", {})
+    m2(f"{key}Ratio", r.get("ratio"), "{:.3f}")
+    m2(f"{key}Err", r.get("err"), "{:.3f}")
+    m2(f"{key}Corr", r.get("ratio_follower_corrected"), "{:.3f}")
+    m2(f"{key}N", (r.get("n1", 0) or 0) + (r.get("n2", 0) or 0), "{:,.0f}")
+    m2(f"{key}Bias", 100 * fbm.get("batch1_over_rest_bias", float("nan")), "{:+.1f}")
+    m2(f"{key}Tau", fbm.get("tau_ns", float("nan")) / 1000, "{:.1f}")
+    m2(f"{key}PerEthirteen", fr.get("FRperEthirteen"), "{:.2f}")
+    m2(f"{key}PerHour", fr.get("FRperHourScan"), "{:,.0f}")
+    m2(f"{key}RunOneReach", fr.get("FRrunOneMinDelta"), "{:.1f}")
+    if tag == "trk":
+        m2("MXspills", d.get("audit", {}).get("spills_used"), "{:,}")
+for tag, key in (("trk", "CDtrk"), ("all", "CDall")):
+    d = jload(f"compare_detectors_{tag}/compare_detectors.json")
+    c = d.get("coincidence_2x2_mx2", {})
+    m2(f"{key}Corr", d.get("spill_corr"), "{:.2f}")
+    m2(f"{key}CorrExp", d.get("spill_corr_expected_from_pot_only"), "{:.0e}")
+    m2(f"{key}Frac", 100 * c.get("frac_2x2_with_mx2", float("nan")), "{:.0f}")
+    m2(f"{key}FracRev", 100 * c.get("frac_mx2_with_2x2", float("nan")), "{:.0f}")
+    m2(f"{key}Acc", 100 * c.get("accidental_pairs_est", float("nan")) / max(c.get("n_2x2", 1), 1), "{:.0f}")
+    m2(f"{key}DtRms", c.get("dt_rms_ns"), "{:.0f}")
+    m2(f"{key}Chi", d.get("block_ratio_chi2"), "{:.0f}")
+    m2(f"{key}Ndf", d.get("block_ratio_ndf"), "{}")
+    m2(f"{key}Ratio", d.get("mx2_over_2x2"), "{:.2f}")
+    if tag == "trk":
+        m2("CDspills", d.get("spills_common"), "{:,}")
+with open(Path(__file__).resolve().parents[1] / "report" / "numbers.tex", "a") as fh:
+    fh.write("\n".join(lines) + "\n")
+print("\n".join(lines))

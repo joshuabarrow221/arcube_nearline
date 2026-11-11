@@ -1,0 +1,74 @@
+{
+  "args": {
+    "flashes": [
+      "results/flashes/packet-0050017-2024_07_08_23_54_32_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_04_33_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_14_34_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_24_35_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_34_36_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_44_37_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_54_38_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_04_39_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_14_40_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_24_41_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_34_42_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_44_44_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_54_45_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_00_19_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_10_20_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_20_21_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_30_22_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_40_23_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_50_24_CDT.FLOW.hdf5.flashes.npz"
+    ],
+    "mx2": [
+      "results/mx2slices/TS1_00050017_0005_numib_v09_2407090337_DST.root.mx2slices.npz",
+      "results/mx2slices/TS1_00050017_0006_numib_v09_2407090615_DST.root.mx2slices.npz",
+      "results/mx2slices/TS1_00050018_0017_numib_v09_2407120509_DST.root.mx2slices.npz"
+    ],
+    "ifbeam": [
+      "/mnt/user-data/uploads/NDPrototype_2x2/get_data_2024-07-09T000000-0500_to_2024-07-09T020500-0500",
+      "/mnt/user-data/uploads/NDPrototype_2x2/get_data_2024-07-12T000100-0500_to_2024-07-12T010100-0500"
+    ],
+    "sel_2x2": "nhits >= 3",
+    "sel_mx2": "ntrk >= 1",
+    "block": 50,
+    "out": "results/compare_detectors_trk"
+  },
+  "spills_common": 7669,
+  "t1_2x2_ns": 1316.6661779894403,
+  "t1_mx2_ns": 379.6151010438334,
+  "per_e13_2x2": 0.2946866388825606,
+  "per_e13_mx2": 0.4195538587480524,
+  "mx2_over_2x2": 1.423728813559322,
+  "spill_corr": 0.43301100928019487,
+  "spill_corr_expected_from_pot_only": 6.931251993834126e-05,
+  "spill_corr_err": 0.011419067262449564,
+  "per_spill_cov": [
+    [
+      1.9747550466541728,
+      0.7467131184745912
+    ],
+    [
+      0.7467131184745912,
+      1.5059011093650307
+    ]
+  ],
+  "blocks": 153,
+  "block_ratio_chi2": 134.8350446237667,
+  "block_ratio_ndf": 152,
+  "block_ratio_pvalue": 0.8378269883254961,
+  "n2x2_block_rate_chi2_ndf": 0.9846919954291489,
+  "nmx2_block_rate_chi2_ndf": 0.968292260774512,
+  "coincidence_2x2_mx2": {
+    "dt_peak_ns": -23.293515512239537,
+    "window_ns": 60.0,
+    "pairs_in_window": 6451,
+    "accidental_pairs_est": 294.8,
+    "n_2x2": 11865,
+    "n_mx2": 17031,
+    "frac_2x2_with_mx2": 0.5436999578592498,
+    "frac_mx2_with_2x2": 0.3787798719981211,
+    "dt_rms_ns": 13.218727697276767
+  }
+}

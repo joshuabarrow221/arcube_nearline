@@ -66,6 +66,15 @@ $\sim$\SI{0.03}{mm} with profile monitors and $\sim$\SI{0.26}{mm} with BPMs, and
 hadron and muon monitors with $10^{6\text{--}8}$ particles per spill
 \cite{zwaska2006}. The useful product of a 2x2 scan is an independent,
 neutrino-side check that the rate-weighted target centre agrees with the BPM centre.
+\item \textbf{MINERvA (Mx2) adds statistics, but less than hoped, and mostly the same
+events.} Track-like MINERvA time slices come at \MXtrkPerEthirteen{} per $10^{13}$\,POT,
+only $\CDtrkRatio\times$ the 2x2 flash rate; all MINERvA slices give $\CDallRatio\times$
+\CERT. \CDtrkFrac\% of 2x2 flashes have a coincident MINERvA track slice within
+$\pm$60\,ns \CERT, so the two are correlated because they largely see the same through-going
+muons, not independent samples. The Mx2 batch split is null as well
+($\MXtrkRatio\pm\MXtrkErr$ for track slices), and MINERvA track rates fall by
+$\approx$1.4\% per batch through the spill ($2.8\sigma$), likely dead time. For a scan,
+all MINERvA slices cut the time per point to minutes (\S\ref{sec:mx2}).
 \item \textbf{Run~1 was taken in reverse horn current (antineutrino mode)}
 \cite{nufact2024}, yet the \texttt{beam\_quality} horn cut ($-202<I<-196.4$\,kA,
 documented as FHC) passes every Run~1 spill with $I\approx\HornI$\,kA. The stripline sum
@@ -131,8 +140,9 @@ recorded ($3.0\times10^{19}$ LRS only).
 \item \textbf{Mx2:} MINERvA DSTs are on the portal (\texttt{data/2x2/Mx2/dst/}: 502 files,
 $\sim$374\,MB each, runs 50000--50018). Each file has one tree, \texttt{minerva}, with one entry
 per gate (gates 1.1997\,s apart) and per-hit \texttt{hit\_time}, \texttt{hit\_module},
-\texttt{hit\_plane}, \texttt{hit\_pe}. That is enough to assign front-plane hits to batches.
-File-name times are UTC \CERT. They were not analysed here; see \S\ref{sec:next}.
+\texttt{hit\_plane}, \texttt{hit\_pe}, plus MINERvA's reconstruction (time slices,
+clusters, tracks). File-name times are UTC \CERT. Three DSTs covering the IFBeam windows
+were analysed (\S\ref{sec:mx2}).
 \item \textbf{Access constraint:} neither portal.nersc.gov nor the IFBeam API is reachable
 from the cloud machine that wrote this report. All fetches ran on the requester's laptop.
 The full-Run~1 extraction should run at NERSC against the files directly.
@@ -255,6 +265,94 @@ maintainers \CERT.
 Right: per-POT flash rate per batch against that batch's mean $x$ at the target.}\label{fig:flash}
 \end{figure}
 
+\section{MINERvA (Mx2) track-like rates and 2x2--Mx2 coincidences}\label{sec:mx2}
+\paragraph{Question.} Can MINERvA's track-like rate stand in for (or add to) the 2x2
+rate? The hypothesis was that Mx2 tracks are highly correlated with 2x2 neutrino activity
+and give better statistics.
+
+\paragraph{Input.} The DSTs carry MINERvA's own reconstruction: time slices, clusters with
+ns times (\texttt{clus\_id\_time}), and tracks with their slice (\texttt{n\_tracks},
+\texttt{trk\_time\_slice}, \texttt{trk\_hits}, \texttt{trk\_theta}) \CERT.
+\texttt{extract\_mx2\_tracks.py} writes one object per time slice (slice index $\geq$1),
+timed by the light-weighted mean cluster time, with its track count and $z$ extent. A slice,
+not a track, is the counting unit, so that one interaction with several tracks counts once.
+Three DSTs cover the two IFBeam windows (run 50017 subruns 5 and 6, run 50018 subrun 17),
+each 7200 gates. The same \texttt{batch\_rates.py} pipeline was run with
+\texttt{--select} and an automatic batch-edge search. \MXspills{} matched goodbeam spills
+were used. Three samples were defined: ``track slices'' (slices with $\geq$1 track),
+``long'' (track slices spanning $>$2\,m in $z$), and ``all slices'' (any activity).
+
+\paragraph{Timing.} The MINERvA slice times show the six batches with sharper gaps than the
+2x2 light (Fig.~\ref{fig:mx2}). The gate GPS time sits $+7.6$\,ms from \$A9 with
+0.7\,ms rms, four times tighter than the light DAQ clock \CERT.
+
+\paragraph{Rates.} Per $10^{13}$\,POT: \MXtrkPerEthirteen{} track slices,
+\MXlongPerEthirteen{} long track slices and \MXallPerEthirteen{} slices of any kind, against
+\FRperEthirteen{} selected 2x2 flashes. \textbf{So the Mx2 track-like rate is only
+$\CDtrkRatio\times$ the 2x2 flash rate, not an order of magnitude more} \CERT. All slices give
+$\CDallRatio\times$. At 100\,kW that is $\approx$\MXtrkPerHour/h (track slices) and
+$\approx$\MXallPerHour/h (all slices).
+
+\paragraph{They are largely the same particles.} Aligning the two detectors' batch-1 starts,
+\CDtrkFrac\% of 2x2 flashes have an Mx2 track slice within $\pm$60\,ns (time-difference
+rms \CDtrkDtRms\,ns; accidentals $\approx$\CDtrkAcc\% of flashes), and \CDallFrac\% have some
+Mx2 slice (accidentals $\approx$\CDallAcc\%) \CERT. Spill by spill, the correlation coefficient
+between the two counts is \CDtrkCorr, against $\sim10^{-4}$ expected from common POT
+fluctuations alone. The interpretation is that most 2x2 flashes are through-going muons
+(rock muons, plus muons from interactions in MINERvA) that MINERvA also tracks \LIK. This
+confirms the correlation hypothesis, but for a mechanical reason: \textbf{shared events
+are not independent statistics.} Adding 2x2 flashes to the Mx2 sample buys almost nothing.
+The 2x2 flashes \emph{without} any Mx2 slice (18--25\%, depending on how accidentals are
+subtracted) are the best light-only proxy for 2x2-contained activity. That is
+$\approx$0.05--0.07 per $10^{13}$\,POT, or $\sim$90--125/h at 100\,kW, the same order as the
+$\sim$50/h assumed in the email thread \GUESS.
+
+\paragraph{Ratio stability.} In \CDspills{} common spills grouped into 50-spill blocks,
+the Mx2/2x2 ratio is constant: $\chi^2/\text{ndf}=\CDtrkChi/\CDtrkNdf$ (track slices) and
+$\CDallChi/\CDallNdf$ (all slices). Here the variance uses the measured per-spill covariance;
+a naive Poisson variance gives $\chi^2/\text{ndf}\approx0.5$, which is the signature of the
+shared events. Run~1's position jitter (0.025\,mm) is far too small for this to test the
+\emph{position} response; only a scan can.
+
+\paragraph{Batch split with Mx2.}
+\begin{center}\small
+\begin{tabular}{lcccc}\toprule
+sample & objects & $R_1/R_{2\text{--}6}$ & follower bias & Run~1 $3\sigma$ reach\\\midrule
+2x2 flashes & \BRflashes & $\BRratio\pm\BRerr$ & \FBbias\% & \FRrunOneMinDelta\%\\
+Mx2 track slices & \MXtrkN & $\MXtrkRatio\pm\MXtrkErr$ & \MXtrkBias\% & \MXtrkRunOneReach\%\\
+Mx2 long track slices & \MXlongN & $\MXlongRatio\pm\MXlongErr$ & \MXlongBias\% & \MXlongRunOneReach\%\\
+Mx2 all slices & \MXallN & $\MXallRatio\pm\MXallErr$ & \MXallBias\% & \MXallRunOneReach\%\\\bottomrule
+\end{tabular}\end{center}
+All are consistent with unity \CERT. Three points matter for any future batch-split
+attempt. (i) MINERvA track slices show \emph{no} post-spill tail, so they have no follower
+bias: a decay electron does not form a new \emph{track} slice \LIK. The ``all
+slices'' sample has a clean decay tail with $\tau=\MXallTau\,\mu$s, the muon lifetime, and
+the same $\approx-2$\% bias as the 2x2 flashes. (ii) Track slices are the cleanest batch-split
+sample, but their full-Run~1 reach ($\approx$\MXtrkRunOneReach\%, assuming the same
+$2.2\times10^{19}$\,POT) is still four times the $\sim$0.2\% signal expected for a centred beam.
+(iii) Track slices have a time-order effect of their own. Their per-POT rate falls across
+the spill: a straight-line fit over batches 2--6 gives $-1.4\pm0.5$\% per batch
+($2.8\sigma$; Fig.~\ref{fig:mx2}, right) \CERT, while all slices show no such fall. MINERvA
+channel dead time after earlier activity, breaking or vetoing later tracks, would do this
+\GUESS. It biases $R_1/R_{2\text{--}6}$ \emph{upwards} by a few per cent, which is the
+opposite sign to the followers and the same size as the measured excess ($\MXtrkRatio$). So no
+sample is free of time-order bias at the per-cent level, and the batch split cannot reach
+the 0.2\% signal with any of them.
+
+\begin{figure}[h]\centering
+\includegraphics[width=0.62\textwidth]{batch_rates_mx2_all/flash_times.pdf}\hfill
+\includegraphics[width=0.36\textwidth]{batch_rates_mx2_trk/rate_vs_batch_x.pdf}
+\caption{Left: MINERvA time-slice times (all slices) relative to the gate, for
+\MXspills{} matched goodbeam spills, with the fitted batch edges. Right: per-POT
+track-slice rate per batch against that batch's mean $x$ at the target.}\label{fig:mx2}
+\end{figure}
+
+\paragraph{Scan statistics with Mx2.} For the 7-point edge scan of \S\ref{sec:sens}
+(\CountsQuarter{} counts per point for 0.25\,mm; \CountsTenth{} for 0.1\,mm), all Mx2 slices
+need $\approx$2 and $\approx$12 minutes per point at 100\,kW, and track slices
+$\approx$5 and $\approx$34 minutes. Statistics stop being a constraint; beam-tuning time
+and machine-protection limits set the schedule.
+
 \section{Sensitivity and extrapolation}\label{sec:sens}
 \paragraph{Batch split, Run~1.} With a fraction $\varphi=1/6$ of the POT in batch~1, a
 fractional difference $\delta$ is seen at $Z\sigma$ when
@@ -312,7 +410,7 @@ because position does not correlate with time order there.
 A 0.3\% share error is already comparable to the expected signal.
 \item \textbf{Trigger identity.} \texttt{trig\_type}=1 was matched to IFBeam counts in one
 file only. Confirm it with the LRS configuration.
-\item \textbf{Horn polarity labelling} (summary item 6).
+\item \textbf{Horn polarity labelling} (summary item 7).
 \item \textbf{Vertical plane.} The fin is tall, so a vertical scan has no edges within a
 safe range. Any vertical optimisation relies on focusing effects of order 1\%/mm.
 \item \textbf{Fin width at 1\,MW.} The 7.4\,mm value is for the NOvA-era ME target. The
@@ -331,9 +429,11 @@ statistics. Do not offer to find a rate maximum on the plateau.
 \item Run \texttt{extract\_lrs\_flashes.py} on all Run~1 v11 files \emph{at NERSC} (local
 filesystem, no streaming), fetch per-batch IFBeam data for the same span, and run
 \texttt{batch\_rates.py}. Include the pile-up study before quoting a ratio.
-\item Mx2: write a DST reader that emits (spill time, hit time relative to gate) for the
-front planes, and feed it to \texttt{detector\_rates}. MINERvA timing ($\sim$ns) resolves
-batches as well. It adds an independent rock-muon sample with different acceptance.
+\item Use MINERvA slices as the primary scan counter (4$\times$ the 2x2 flash rate, sharper
+timing, a tighter clock) and the 2x2 as the cross-check. Do not add the two samples as if
+independent: most 2x2 flashes are the same muons. For a contained-$\nu$ 2x2 rate, anti-tag
+flashes with MINERvA (\texttt{scripts/compare\_detectors.py}) and, better, use charge
+reconstruction.
 \item Obtain g4numi derivatives of the 2x2 flash and contained-$\nu$ rates with respect to
 beam $x$, $y$ and angle for the current target and horns. They replace the
 interception-only model before any scan decision.
