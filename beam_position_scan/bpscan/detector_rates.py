@@ -96,3 +96,40 @@ def rates_by_group(counts, batches, group_col, edges_ns, guard_ns):
     g["rate_per_1e13"] = g["n"] / g["pot"] * 1e13
     g["rate_err"] = np.sqrt(g["n"]) / g["pot"] * 1e13
     return g
+
+
+def follower_bias(t_rel_ns, edges_ns, tail_bins_ns=(100, 1100, 2100, 3100, 4100), width_ns=1000.0):
+    """Time-order bias from delayed 'follower' flashes (e.g. Michel electrons).
+
+    A muon stopping in or near the detector gives a second flash ~2.2 us later.
+    Followers of interactions in early batches land in later batches, so later
+    batches collect extra counts that batch 1 cannot (nothing precedes it).
+    This inflates batches 2-6 relative to batch 1 even with no position effect.
+
+    Method (data-driven, no simulation):
+      1. Fit an exponential to the flash density in the post-spill tail
+         (after the last batch edge, where only followers remain); gives the
+         follower time constant tau and the density A at the spill end.
+      2. Steady-state follower fraction f = A / (in-spill flash density).
+      3. Within the spill the follower density ramps as 1 - exp(-t/tau), so the
+         expected follower fraction of batch k is f * <1 - exp(-t/tau)>_batch k.
+    Returns dict(tau_ns, f, per_batch_fraction[6], batch1_over_rest_bias).
+    The bias is multiplicative: measured ratio ~= true ratio * (1 + bias).
+    Requires a few hundred tail flashes to be meaningful; check `tail_counts`.
+    """
+    t = np.asarray(t_rel_ns, float)
+    e0, e1 = edges_ns[0], edges_ns[-1]
+    n_in = ((t >= e0) & (t < e1)).sum()
+    dens = n_in / (e1 - e0)                                     # per ns
+    x = np.array(tail_bins_ns, float) + width_ns / 2
+    y = np.array([((t >= e1 + a) & (t < e1 + a + width_ns)).sum() for a in tail_bins_ns], float)
+    slope, icpt = np.polyfit(x, np.log(np.maximum(y, 0.5)), 1, w=np.sqrt(np.maximum(y, 1)))
+    tau = -1.0 / slope if slope < 0 else np.inf
+    A = np.exp(icpt) / width_ns                                 # density at spill end, per ns
+    f = A / dens if dens > 0 else np.nan
+    tt = np.linspace(0, e1 - e0, 20000)
+    g = 1 - np.exp(-tt / tau)
+    per = [float(f * g[(tt >= edges_ns[k] - e0) & (tt < edges_ns[k + 1] - e0)].mean()) for k in range(len(edges_ns) - 1)]
+    bias = (1 + per[0]) / (1 + np.mean(per[1:])) - 1
+    return dict(tau_ns=float(tau), f=float(f), per_batch_fraction=per, batch1_over_rest_bias=float(bias),
+                tail_counts=y.tolist(), in_spill=int(n_in))

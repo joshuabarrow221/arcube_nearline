@@ -1,0 +1,202 @@
+{
+  "audit": {
+    "beam_triggers": 9320,
+    "unmatched_triggers": 282,
+    "trigger_minus_A9_offset_ms": 13.000011444091797,
+    "trigger_resid_rms_ms": 2.898188633735212,
+    "dropped_timing_resid": 14,
+    "dropped_duplicate_match": 1143,
+    "dropped_not_goodbeam": 18,
+    "spills_used": 7868,
+    "batch1_start_ns": 1317.0,
+    "flashes_selected": 9018,
+    "background_flashes_per_ns": 0.0
+  },
+  "args": {
+    "flashes": [
+      "results/flashes/packet-0050017-2024_07_08_23_54_32_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_04_33_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_14_34_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_24_35_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_34_36_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_44_37_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_00_54_38_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_04_39_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_14_40_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_24_41_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_34_42_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_44_44_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050017-2024_07_09_01_54_45_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_00_19_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_10_20_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_20_21_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_30_22_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_40_23_CDT.FLOW.hdf5.flashes.npz",
+      "results/flashes/packet-0050018-2024_07_12_00_50_24_CDT.FLOW.hdf5.flashes.npz"
+    ],
+    "ifbeam": [
+      "/mnt/user-data/uploads/NDPrototype_2x2/get_data_2024-07-09T000000-0500_to_2024-07-09T020500-0500",
+      "/mnt/user-data/uploads/NDPrototype_2x2/get_data_2024-07-12T000100-0500_to_2024-07-12T010100-0500"
+    ],
+    "out": "results/batch_rates_ntpc2",
+    "max_resid_ms": 10.0,
+    "guard_ns": 50.0,
+    "guard_b1_extra_ns": 50.0,
+    "min_nhits": 3,
+    "min_ntpc": 2,
+    "t1_guess_ns": 1250.0,
+    "run1_pot": 2.2e+19,
+    "scan_power_kw": 100.0
+  },
+  "per_batch": [
+    {
+      "batch": 1,
+      "n": 1331.0,
+      "pot": 5.7014208643086376e+16,
+      "x": 0.07703852010813839,
+      "y": -0.9955443732659206,
+      "bkg": 0.0,
+      "rate_e13": 0.23345057866753344,
+      "err_e13": 0.006398908896954998
+    },
+    {
+      "batch": 2,
+      "n": 1446.0,
+      "pot": 6.020372407820194e+16,
+      "x": 0.3091384735569604,
+      "y": -0.9473060111063369,
+      "bkg": 0.0,
+      "rate_e13": 0.24018447731268433,
+      "err_e13": 0.006316271504113038
+    },
+    {
+      "batch": 3,
+      "n": 1440.0,
+      "pot": 6.2349756523508216e+16,
+      "x": 0.3783638144264067,
+      "y": -0.9480443664116182,
+      "bkg": 0.0,
+      "rate_e13": 0.2309551921757811,
+      "err_e13": 0.006086203705978062
+    },
+    {
+      "batch": 4,
+      "n": 1397.0,
+      "pot": 6.382786908720436e+16,
+      "x": 0.4247892770585555,
+      "y": -0.9532693936770925,
+      "bkg": 0.0,
+      "rate_e13": 0.21886991058582247,
+      "err_e13": 0.005855821871633564
+    },
+    {
+      "batch": 5,
+      "n": 1557.0,
+      "pot": 6.351789463374757e+16,
+      "x": 0.4038432307426034,
+      "y": -0.9357056238358588,
+      "bkg": 0.0,
+      "rate_e13": 0.24512777209916423,
+      "err_e13": 0.006212239801306783
+    },
+    {
+      "batch": 6,
+      "n": 1442.0,
+      "pot": 6.2102793148077416e+16,
+      "x": 0.4374871380080507,
+      "y": -0.9189205261286116,
+      "bkg": 0.0,
+      "rate_e13": 0.2321956754121681,
+      "err_e13": 0.006114648499231092
+    }
+  ],
+  "batch1_over_rest": {
+    "ratio": 1.0002342240180389,
+    "err": 0.029817042809769895,
+    "pvalue": 0.9881074869019528,
+    "ci68": [
+      0.970422415619163,
+      1.0309523372591691
+    ],
+    "n1": 1331.0,
+    "n2": 7282.0,
+    "min_detectable_3sigma": 0.08673817482393109,
+    "ratio_follower_corrected": 1.003293560505386
+  },
+  "pileup_fraction_with_earlier_flash_by_batch": {
+    "1": 0.06987227648384674,
+    "2": 0.21161825726141079,
+    "3": 0.35347222222222224,
+    "4": 0.4652827487473157,
+    "5": 0.5619781631342325,
+    "6": 0.6359223300970874
+  },
+  "masking_test": {
+    "2": {
+      "n_with": 1238,
+      "n_without": 6630,
+      "ratio_with_over_without": 0.9455853492141317,
+      "err": 0.06962722277535245
+    },
+    "3": {
+      "n_with": 2378,
+      "n_without": 5490,
+      "ratio_with_over_without": 0.9959837275756729,
+      "err": 0.057199157747351174
+    },
+    "4": {
+      "n_with": 3309,
+      "n_without": 4559,
+      "ratio_with_over_without": 0.9955190771795638,
+      "err": 0.0539744909165139
+    },
+    "5": {
+      "n_with": 4056,
+      "n_without": 3812,
+      "ratio_with_over_without": 1.045686039945512,
+      "err": 0.053076826270944774
+    },
+    "6": {
+      "n_with": 4738,
+      "n_without": 3130,
+      "ratio_with_over_without": 1.049632710966683,
+      "err": 0.056770243098201896
+    }
+  },
+  "follower_bias": {
+    "tau_ns": 10721.968675723134,
+    "f": 0.009581802769894818,
+    "per_batch_fraction": [
+      0.0006732595865012453,
+      0.001895317643954056,
+      0.0029495855745449123,
+      0.003859251538012819,
+      0.004644148945096267,
+      0.005321390882672679
+    ],
+    "batch1_over_rest_bias": -0.00304929345485494,
+    "tail_counts": [
+      6.0,
+      9.0,
+      9.0,
+      7.0,
+      1.0
+    ],
+    "in_spill": 8985
+  },
+  "duplicate_triggers_by_file": {
+    "packet-0050017-2024_07_09_01_14_40_CDT.FLOW.hdf5.flashes.npz": 687,
+    "packet-0050018-2024_07_12_00_00_19_CDT.FLOW.hdf5.flashes.npz": 456
+  },
+  "flash_rates": {
+    "FRperSpill": 1.1419674631418404,
+    "FRperEthirteen": 0.22430671327806595,
+    "FRrockPerSpill": 0.235510930350788,
+    "FRspillPot": 5.091098016875578,
+    "FRpowerKw": 815.6838284041789,
+    "FRperHourScan": 383.46353156760307,
+    "FRrockPerHourScan": 79.08268491872771,
+    "FRrunOneTotal": 493474.76921174506,
+    "FRrunOneMinDelta": 1.1459219190435794
+  }
+}

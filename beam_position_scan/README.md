@@ -32,9 +32,10 @@ setpoint and fit the known interception shape for the target-fin centre.
 | Spill/batch timing model, batch assignment with guard bands | done, unit-tested | `bpscan/numi.py` |
 | IFBeam per-batch positions at target z, per-batch POT share | done, tested on synthetic data; run on July 9/12 2024 exports | `bpscan/ifbeam.py`, `scripts/analyze_ifbeam_batches.py` |
 | Interception model, Poisson sensitivity, scan toy MC | done | `bpscan/target_model.py`, `bpscan/stats.py`, `scripts/sensitivity_study.py` |
-| 2x2 FLOW light reader -> per-trigger flashes (.npz), local or HTTP byte ranges | done; validated on one v11 file (run 50017, 2024-07-09 00:04 CDT) | `bpscan/flow_light.py`, `scripts/extract_lrs_flashes.py` |
-| Spill matching, timing-drift veto, batch-edge fit, per-batch per-POT rates, pile-up masking test | done; run on that one file only (451 spills) | `bpscan/detector_rates.py`, `scripts/batch_rates.py` |
-| Run 1 at scale (all v11 files + matching IFBeam per-batch data) | **not run** - do it at NERSC on local files | see "Picking this up" |
+| 2x2 FLOW light reader -> per-trigger flashes (.npz), local or HTTP byte ranges | done; run on 19 v11 files (run 50017 2024-07-09 23:54-02:05 CDT, run 50018 2024-07-12 00:00-01:00 CDT), outputs in `results/flashes/` | `bpscan/flow_light.py`, `scripts/extract_lrs_flashes.py` |
+| Spill matching, timing-drift veto, duplicate-trigger veto, batch-edge fit, per-batch per-POT rates, masking test, follower-bias estimate | done on the 19 files (7,868 spills, 11,937 flashes): batch1/rest = 0.992 +- 0.026 (all), 1.000 +- 0.030 (>=2 TPCs). Null, as predicted. Delayed followers bias the ratio by -2.1% (all) / -0.3% (>=2 TPCs) | `bpscan/detector_rates.py`, `scripts/batch_rates.py`, `results/batch_rates*/` |
+| Run 1 at scale (all v11 files, ~2.2e19 POT + matching IFBeam per-batch data) | **not run** - needs IFBeam per-batch exports for the whole run and the extractor at NERSC; expected 3-sigma reach ~1% | see "Picking this up" |
+| Data defect | two v11 files (`packet-0050017-2024_07_09_01_14_40`, `packet-0050018-2024_07_12_00_00_19`) contain duplicated light beam triggers (687 and 456 triggers share a spill). Dropped; report to reflow maintainers | `batch_rates.json: duplicate_triggers_by_file` |
 | Mx2 (MINERvA) reader | **not started**. DSTs exist: `portal.nersc.gov/project/dune/data/2x2/Mx2/dst/` (502 files, ~374 MB each; runs 50000-50018). Tree `minerva`, one entry per gate, per-hit `hit_time`, `hit_module`, `hit_plane`, `hit_pe` - enough to assign hits to batches | — |
 
 ## Layout

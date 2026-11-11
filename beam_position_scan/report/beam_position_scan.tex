@@ -30,20 +30,26 @@ Against a \SI{7.4}{mm}-wide target fin and a $\sigma_x=\SigX$\,mm beam this chan
 fraction of protons hitting the fin by only \PredAzero\% if the beam sits at the
 BPM-coordinate origin, and by \PredAmone\% / \PredAone\% if the fin centre is
 \SI{1}{mm} to either side \LIK. Run~1 should yield $\sim\!\FRrunOneTotal$ selected in-spill
-light flashes (projected from one file, \LIK), enough to see a \FRrunOneMinDelta\% batch-1/batches-2--6 difference at
+light flashes (projected from the 19-file rate, \LIK), enough to see a \FRrunOneMinDelta\% batch-1/batches-2--6 difference at
 $3\sigma$. The batch split can therefore only flag a beam that was $\gtrsim1$\,mm off the
-fin centre in $x$. It cannot locate an optimum.
+fin centre in $x$. It cannot locate an optimum. Measured on \BRspills{} spills from
+\BRfiles{} files: $R_1/R_{2\text{--}6}=\BRratio\pm\BRerr$ for all flashes and
+$\BRtwoRatio\pm\BRtwoErr$ for flashes lighting $\geq$2 TPCs. Both are null, as predicted
+\CERT.
 \item \textbf{Halving or quartering the batch ``ellipses'' adds nothing in $x$.} The beam is
 extremely steady in $x$ (spill RMS \PosXrms\,mm), so splitting each batch population at its
 median gives a lever arm of only \LevBoneXhalf\,mm (batch~1) and \LevRestXhalf\,mm
 (batches 2--6) \CERT. In $y$ the halves differ by \LevRestYhalf\,mm, but the fin is
 \SI{63}{mm} tall, so interception has no $y$ dependence there. Any $y$ effect would come
 from horn focusing alone, which is much weaker \LIK.
-\item \textbf{The batch comparison is confounded by time order.} Batch~1 is always first in
-the spill. Any light-system pile-up or hit-finding loss after an earlier flash lowers the
-later batches' efficiency. The resulting bias is of the same order as the predicted signal
-(estimated at 1--3\%, \GUESS). It must be measured, not assumed, before a batch-split
-result is interpreted (\S\ref{sec:syst}).
+\item \textbf{The batch comparison is confounded by time order, and the bias is bigger than
+the signal.} Batch~1 is always first in the spill. Delayed ``follower'' flashes from earlier
+interactions ($\tau\approx\FBtau\,\mu$s, consistent with stopped-muon decays) pile into the
+later batches and never into batch~1. Measured from the post-spill tail, this biases
+$R_1/R_{2\text{--}6}$ by \FBbias\% for all flashes and \FBtwoBias\% for flashes lighting
+$\geq$2 TPCs \LIK. Both are larger than the $\sim$0.2\% interception signal expected for a
+centred beam. No pile-up \emph{loss} is seen: later batches have, if anything, more flashes
+after an earlier one (batch~6: $\MaskSix\pm\MaskSixErr$) (\S\ref{sec:syst}).
 \item \textbf{A dedicated horizontal scan that reaches the fin edges is feasible with the
 2x2 light system at \SI{100}{kW}.} The measured in-spill flash rate is \FRperEthirteen{}
 flashes per $10^{13}$\,POT ($\approx$\FRperSpill{} per spill at \FRpowerKw\,kW). That
@@ -217,14 +223,30 @@ into flashes, so a through-going muon counts once. Flashes need $\geq3$ hits.
 the POT is scaled by the surviving fraction of each batch.
 \end{enumerate}
 
-\paragraph{Result (one 10-minute file, 2024-07-09 00:04--00:14 CDT, run 50017).}
+\paragraph{Result (\BRfiles{} files: 2024-07-09 23:54--02:05 and 2024-07-12 00:00--01:00 CDT, runs 50017/50018).}
 \BRtrig{} beam triggers; \BRunmatched{} unmatched, \BRdropT{} dropped for timing,
 \BRdropDup{} duplicate matches and \BRdropGB{} not goodbeam, leaving \BRspills{} spills and
 \BRflashes{} selected flashes. Batch~1 / batches 2--6 per-POT rate ratio:
 \[ R_1/R_{2\text{--}6}=\BRratio\pm\BRerr\quad(p=\BRpval), \]
 with \BRnone{} and \BRnrest{} flashes. The $3\sigma$ reach of this subsample is
-\BRmindelta\%, an order of magnitude above any plausible signal. As expected, the
-subsample demonstrates the pipeline. It does not test the physics. The 19-file extraction covering both IFBeam windows was blocked on the laptop by a local permission rule and has not run yet.
+\BRmindelta\%, an order of magnitude above the $\sim$0.2\% expected for a centred beam.
+In the interception model ($\sigma=1.48$\,mm, $w=7.4$\,mm) a ratio this far from unity
+needs the fin centre $\gtrsim$3\,mm from the beam, so this sample excludes only a gross
+miss \LIK. The full Run~1 sample (reach $\approx$1\%) would reach $\approx$1\,mm. Requiring $\geq$2 lit TPCs
+(which suppresses single-TPC followers) gives $\BRtwoRatio\pm\BRtwoErr$ from \BRtwoN{} flashes.
+Correcting each for the follower bias gives \BRcorr{} and \BRtwoCorr{}, respectively.
+
+\paragraph{The batch edges are visible in the data.} The flash-time distribution
+(Fig.~\ref{fig:flash}) has narrow dips at the fitted batch boundaries: the empty RF buckets
+between Booster batches. So the batch assignment is checked by the data themselves, not
+only by the 84-bucket arithmetic \CERT.
+
+\paragraph{Data defect: duplicated light events.} Two of the \BRfiles{} v11 files
+(\texttt{packet-0050017-2024\_07\_09\_01\_14\_40} and \texttt{packet-0050018-2024\_07\_12\_00\_00\_19})
+contain repeated light triggers: 687 and 456 beam triggers, respectively, share an
+IFBeam spill with another trigger. All \BRdropDup{} such triggers were dropped, together
+with the spills they matched, rather than guessing which copy is real. This should go to the reflow
+maintainers \CERT.
 
 \begin{figure}[h]\centering
 \includegraphics[width=0.62\textwidth]{batch_rates/flash_times.pdf}\hfill
@@ -277,13 +299,15 @@ fin-edge heating) is the accelerator's call.
 
 \section{Systematics and caveats}\label{sec:syst}
 \begin{itemize}
-\item \textbf{Time-order (pile-up) bias in the batch split.} Light from an earlier
-interaction can mask or merge a later one, lowering the efficiency of later batches. At
-$\approx$1.5 flashes per \SI{9.5}{\micro s} spill over 8 TPCs and an assumed
-$\sim$\SI{1}{\micro s} masking window, the batch-6 versus batch-1 efficiency difference is
-of order a few per cent \GUESS. Measure it from data: the conditional rate in batch $k$
-given $n$ earlier flashes, and the rate's dependence on spill intensity. The scan is not
-affected, because position does not correlate with time order there.
+\item \textbf{Time-order bias in the batch split.} Two opposite effects are possible:
+masking (an earlier flash hides a later one) and followers (an earlier interaction adds a
+delayed flash). The data show followers dominating. The post-spill tail decays with
+$\tau\approx\FBtau\,\mu$s, and the steady-state follower fraction is \FBf\% of in-spill
+flashes (\FBtwoF\% with $\geq$2 TPCs). The expected follower share rises from batch~1 to
+batch~6, biasing $R_1/R_{2\text{--}6}$ by \FBbias\% (\FBtwoBias\%). The tail fit uses only
+$\sim$100 flashes, so these corrections are uncertain at the $\sim$30--50\% level \LIK.
+\texttt{detector\_rates.follower\_bias} implements the estimate. The scan is not affected,
+because position does not correlate with time order there.
 \item \textbf{Per-batch POT.} The batch shares come from BPM intensities, not toroids.
 A 0.3\% share error is already comparable to the expected signal.
 \item \textbf{Trigger identity.} \texttt{trig\_type}=1 was matched to IFBeam counts in one

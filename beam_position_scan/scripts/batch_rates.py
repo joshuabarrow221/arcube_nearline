@@ -94,6 +94,7 @@ def main():
     audit["dropped_timing_resid"] = int((bad_t & (j >= 0)).sum())
     dup = trig.spill.duplicated(keep=False) & (trig.spill >= 0)
     audit["dropped_duplicate_match"] = int(dup.sum())
+    trig_all = trig.copy()
     keep = (j >= 0) & ~bad_t & ~dup
     trig = trig[keep].merge(spills, on="spill")
     audit["dropped_not_goodbeam"] = int((trig.goodbeam != 1).sum())
@@ -158,6 +159,14 @@ def main():
         mask_rows[k] = dict(n_with=int(earlier.sum()), n_without=int((~earlier).sum()),
                             ratio_with_over_without=float(r), err=float(err))
     res["masking_test"] = mask_rows
+    fb = dr.follower_bias(f.t_rel.values, edges)
+    res["follower_bias"] = fb
+    rr = res["batch1_over_rest"]
+    rr["ratio_follower_corrected"] = rr["ratio"] / (1 + fb["batch1_over_rest_bias"])
+    # duplicated light events (seen in two v11 files): every trigger mapping to
+    # an already-used spill is dropped above; list which input files had them
+    dupfiles = trig_all.groupby("file").apply(lambda d: int((d.spill[d.spill >= 0].duplicated(keep=False)).sum()))
+    res["duplicate_triggers_by_file"] = {Path(a.flashes[int(k)]).name: int(v) for k, v in dupfiles.items() if v}
     # absolute rates and projections ---------------------------------------
     inwin = (f.t_rel >= edges[0]) & (f.t_rel < edges[-1])
     spot = trig.spillpot.mean()

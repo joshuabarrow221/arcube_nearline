@@ -131,3 +131,36 @@ for prec, pname in (("0.5", "Half"), ("0.25", "Quarter"), ("0.1", "Tenth")):
 with open(Path(__file__).resolve().parents[1] / "report" / "numbers.tex", "a") as fh:
     fh.write("\n".join(extra) + "\n")
 print("\n".join(extra))
+
+# --- 19-file results: selection with >=2 TPCs, follower bias, masking test ----
+b2 = load("batch_rates_ntpc2/batch_rates.json")
+r2 = b2.get("batch1_over_rest", {})
+fb = br.get("follower_bias", {})
+fb2 = b2.get("follower_bias", {})
+mt = br.get("masking_test", {})
+lines = []
+
+
+def m2(name, value, fmt):
+    try:
+        lines.append(f"\\newcommand{{\\{name}}}{{{fmt.format(value)}}}")
+    except Exception:
+        lines.append(f"\\newcommand{{\\{name}}}{{??}}")
+
+
+m2("BRtwoRatio", r2.get("ratio"), "{:.3f}")
+m2("BRtwoErr", r2.get("err"), "{:.3f}")
+m2("BRtwoN", (r2.get("n1", 0) or 0) + (r2.get("n2", 0) or 0), "{:,.0f}")
+m2("BRcorr", br.get("batch1_over_rest", {}).get("ratio_follower_corrected"), "{:.3f}")
+m2("BRtwoCorr", r2.get("ratio_follower_corrected"), "{:.3f}")
+m2("FBbias", 100 * fb.get("batch1_over_rest_bias", float("nan")), "{:+.1f}")
+m2("FBtwoBias", 100 * fb2.get("batch1_over_rest_bias", float("nan")), "{:+.1f}")
+m2("FBtau", fb.get("tau_ns", float("nan")) / 1000, "{:.1f}")
+m2("FBf", 100 * fb.get("f", float("nan")), "{:.1f}")
+m2("FBtwoF", 100 * fb2.get("f", float("nan")), "{:.1f}")
+m2("MaskSix", mt.get("6", {}).get("ratio_with_over_without"), "{:.2f}")
+m2("MaskSixErr", mt.get("6", {}).get("err"), "{:.2f}")
+m2("BRfiles", len(br.get("args", {}).get("flashes", [])), "{}")
+with open(Path(__file__).resolve().parents[1] / "report" / "numbers.tex", "a") as fh:
+    fh.write("\n".join(lines) + "\n")
+print("\n".join(lines))
