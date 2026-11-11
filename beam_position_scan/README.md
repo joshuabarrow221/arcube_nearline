@@ -32,9 +32,10 @@ setpoint and fit the known interception shape for the target-fin centre.
 | Spill/batch timing model, batch assignment with guard bands | done, unit-tested | `bpscan/numi.py` |
 | IFBeam per-batch positions at target z, per-batch POT share | done, tested on synthetic data; run on July 9/12 2024 exports | `bpscan/ifbeam.py`, `scripts/analyze_ifbeam_batches.py` |
 | Interception model, Poisson sensitivity, scan toy MC | done | `bpscan/target_model.py`, `bpscan/stats.py`, `scripts/sensitivity_study.py` |
-| Per-batch per-POT detector counting, spill matching, timing veto | written, **not yet run on Run 1 detector data** | `bpscan/detector_rates.py` |
-| 2x2 FLOW reader producing (spill, t_rel_ns) | see report §"Data access"; depends on FLOW layout | `scripts/` (to add) |
-| Mx2 (MINERvA) reader | **not started**: MINERvA files are not on the NERSC portal | — |
+| 2x2 FLOW light reader -> per-trigger flashes (.npz), local or HTTP byte ranges | done; validated on one v11 file (run 50017, 2024-07-09 00:04 CDT) | `bpscan/flow_light.py`, `scripts/extract_lrs_flashes.py` |
+| Spill matching, timing-drift veto, batch-edge fit, per-batch per-POT rates, pile-up masking test | done; run on that one file only (451 spills) | `bpscan/detector_rates.py`, `scripts/batch_rates.py` |
+| Run 1 at scale (all v11 files + matching IFBeam per-batch data) | **not run** - do it at NERSC on local files | see "Picking this up" |
+| Mx2 (MINERvA) reader | **not started**. DSTs exist: `portal.nersc.gov/project/dune/data/2x2/Mx2/dst/` (502 files, ~374 MB each; runs 50000-50018). Tree `minerva`, one entry per gate, per-hit `hit_time`, `hit_module`, `hit_plane`, `hit_pe` - enough to assign hits to batches | — |
 
 ## Layout
 
@@ -99,8 +100,15 @@ cd report && pdflatex beam_position_scan.tex && pdflatex beam_position_scan.tex
   dbdata3vm.fnal.gov return proxy 403). Run fetches on NERSC or a laptop.
 * The FLOW streaming pattern (HTTP byte ranges, h5py over fsspec, strong
   ETag) lives on branch `dev/purity-overlay`, `actions/lifetime/flow_input.py`.
-* The next concrete task is a reader that turns one Run 1 FLOW file into
-  `(spill_time_s, t_rel_ns)` arrays for (a) light flashes and (b)
-  anode-crossing CRS tracks, then `detector_rates.rates_by_group(...)` with
-  `group_col='is_batch1'`.
+* Next concrete task: run the extractor over all Run 1 v11 beam FLOW files
+  (at NERSC: `/global/cfs/cdirs/dune/www/data/2x2/reflows/v11/flow/beam/*/*/*.FLOW.hdf5`),
+  fetch per-batch IFBeam data for the same span with `../beam_quality/get_data.cpp`
+  in 1-hour windows, then
+  `python3 scripts/batch_rates.py --flashes flashes/*.npz --ifbeam <stems> --out results/batch_rates`.
+  Look at `masking_test` in the output before quoting the batch-1 ratio.
+* Then: an Mx2 DST reader emitting (gate time, hit_time relative to the spill)
+  for the front veto planes, fed to the same rate code.
+* Note: in `../beam_quality/README.md` / `get_data.cpp` the horn current reads
+  about -200 kA and is described as FHC, but Run 1 was antineutrino (RHC) running.
+  The stripline sum does not carry polarity; do not use the horn cut to tell FHC from RHC.
 * Open physics questions are listed at the end of the report.

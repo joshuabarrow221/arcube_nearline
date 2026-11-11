@@ -66,6 +66,9 @@ def main():
     p.add_argument("--min-nhits", type=int, default=3)
     p.add_argument("--min-ntpc", type=int, default=1)
     p.add_argument("--t1-guess-ns", type=float, default=1250.0)
+    p.add_argument("--run1-pot", type=float, default=2.2e19,
+                   help="Run 1 POT with CRS+LRS live (RunsDB mx2x2runs_v0.2: 2.2e19; LRS-only 3.0e19)")
+    p.add_argument("--scan-power-kw", type=float, default=100.0)
     a = p.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     audit = {}
@@ -140,6 +143,37 @@ def main():
     f_sorted["n_before"] = f_sorted.groupby("spill").cumcount()
     res["pileup_fraction_with_earlier_flash_by_batch"] = (
         f_sorted.groupby("batch")["n_before"].apply(lambda s: float((s > 0).mean())).to_dict())
+    # Masking test: for batch k>=2, compare the mean number of flashes in batch k
+    # in spills WITH vs WITHOUT any selected flash in batches < k. For independent
+    # Poisson arrivals (and the ~1% spill-intensity spread) the two are equal;
+    # a deficit after an earlier flash measures pile-up / hit-finding loss.
+    cnt = counts.pivot_table(index="spill", columns="batch", values="n", fill_value=0)
+    cnt = cnt.reindex(index=trig.spill.unique(), columns=range(1, 7), fill_value=0)
+    mask_rows = {}
+    for k in range(2, 7):
+        earlier = cnt.loc[:, 1:k - 1].sum(axis=1) > 0
+        a1, a0 = cnt.loc[earlier, k], cnt.loc[~earlier, k]
+        r = (a1.mean() / a0.mean()) if a0.mean() > 0 else float("nan")
+        err = r * np.sqrt(1 / max(a1.sum(), 1) + 1 / max(a0.sum(), 1))
+        mask_rows[k] = dict(n_with=int(earlier.sum()), n_without=int((~earlier).sum()),
+                            ratio_with_over_without=float(r), err=float(err))
+    res["masking_test"] = mask_rows
+    # absolute rates and projections ---------------------------------------
+    inwin = (f.t_rel >= edges[0]) & (f.t_rel < edges[-1])
+    spot = trig.spillpot.mean()
+    rock = inwin & (f.ntpc >= 4)
+    cyc_spills_per_h = 3600.0 / 60.46 * 46          # 46 NuMI spills per ~60.46 s supercycle
+    pot_per_spill_scan = spot * a.scan_power_kw / numi.beam_power_kw(spot)
+    pot_h = pot_per_spill_scan * cyc_spills_per_h
+    frs = dict(FRperSpill=float(inwin.sum() / len(trig)), FRperEthirteen=float(inwin.sum() / (spot * len(trig)) * 1e13),
+               FRrockPerSpill=float(rock.sum() / len(trig)), FRspillPot=float(spot / 1e13),
+               FRpowerKw=float(numi.beam_power_kw(spot)),
+               FRperHourScan=float(inwin.sum() / (spot * len(trig)) * pot_h),
+               FRrockPerHourScan=float(rock.sum() / (spot * len(trig)) * pot_h),
+               FRrunOneTotal=float(inwin.sum() / (spot * len(trig)) * a.run1_pot),
+               FRrunOneMinDelta=float(100 * stats.min_detectable_delta(inwin.sum() / (spot * len(trig)) * a.run1_pot)))
+    (out / "flash_rate_summary.json").write_text(json.dumps(frs, indent=2))
+    res["flash_rates"] = frs
     (out / "batch_rates.json").write_text(json.dumps(res, indent=2, default=float))
 
     # figures
