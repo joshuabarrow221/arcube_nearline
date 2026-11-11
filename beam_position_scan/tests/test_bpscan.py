@@ -107,3 +107,24 @@ def test_ifbeam_loader(tmp_path):
     d = ifbeam.batch1_minus_rest(b)
     # both BPM stations carry the same -0.3 mm batch-1 shift -> -0.3 mm at target
     assert np.allclose(d.dx, -0.3, atol=1e-9) and np.allclose(d.dy, 0.0, atol=1e-9)
+
+
+def test_mx2_slices_from_chunk():
+    """Slices >= 1 only; light-weighted time; tracks attached to their slice."""
+    ak = pytest.importorskip("awkward")
+    from bpscan import mx2_tracks as mx
+    ch = dict(ev_gps_time_sec=ak.Array([100, 101]), ev_gps_time_usec=ak.Array([5, 7]),
+              ev_trigger_type=ak.Array([16, 16]), ev_gate=ak.Array([1, 2]), n_slices=ak.Array([2, 1]),
+              clus_id_time=ak.Array([[10., 20., 500., 9000.], [30.]]),
+              clus_id_time_slice=ak.Array([[1, 1, 2, 0], [1]]),
+              clus_id_pe=ak.Array([[1., 3., 2., 5.], [1.]]), clus_id_z=ak.Array([[1., 5., 3., 0.], [2.]]),
+              n_tracks=ak.Array([2, 0]), trk_time_slice=ak.Array([[1, 1], []]),
+              trk_hits=ak.Array([[10, 20], []]), trk_nodes=ak.Array([[5, 9], []]),
+              trk_theta=ak.Array([[0.1, 0.3], []]))
+    g, s = mx.slices_from_chunk(ch, 0)
+    assert len(g) == 2 and abs(g.utime_ms[0] - 100000.005) < 1e-6
+    assert len(s) == 3                                   # slice 0 dropped
+    first = s[(s.event == 0) & (s.slice == 1)].iloc[0]
+    assert abs(first.t_rel - 17.5) < 1e-9 and first.ntrk == 2 and first.trk_hits_max == 20
+    assert first.zmax - first.zmin == 4.0
+    assert s[(s.event == 0) & (s.slice == 2)].ntrk.iloc[0] == 0

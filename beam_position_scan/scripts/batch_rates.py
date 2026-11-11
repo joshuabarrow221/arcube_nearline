@@ -23,6 +23,13 @@ Pipeline (each step writes its counts to the audit in the output JSON)
 
 Flash selection (--min-nhits, --min-ntpc) is the "neutrino-equivalent" proxy:
   min-ntpc >= 2 favours through-going (rock-muon-like) activity.
+
+MINERvA (Mx2): pass *.mx2slices.npz from extract_mx2_tracks.py to --flashes
+and choose objects with --select, a pandas query on the per-slice columns,
+e.g. --select "ntrk >= 1" (track-like slices) or
+--select "ntrk >= 1 and zmax - zmin > 2000" (long, rock-muon-like). With
+--select the --min-nhits/--min-ntpc cuts are ignored. --t1-guess-ns auto
+finds the spill in an unfamiliar clock (the MINERvA gate) from the data.
 """
 import argparse
 import json
@@ -65,7 +72,10 @@ def main():
     p.add_argument("--guard-b1-extra-ns", type=float, default=50.0)
     p.add_argument("--min-nhits", type=int, default=3)
     p.add_argument("--min-ntpc", type=int, default=1)
-    p.add_argument("--t1-guess-ns", type=float, default=1250.0)
+    p.add_argument("--t1-guess-ns", default="1250",
+                   help="batch-1 start guess in the detector clock [ns], or 'auto'")
+    p.add_argument("--select", default=None, help="pandas query on flash_* columns (replaces nhits/ntpc cuts)")
+    p.add_argument("--time-col", default="t_rel", help="object time column (Mx2: t_rel or t_min)")
     p.add_argument("--run1-pot", type=float, default=2.2e19,
                    help="Run 1 POT with CRS+LRS live (RunsDB mx2x2runs_v0.2: 2.2e19; LRS-only 3.0e19)")
     p.add_argument("--scan-power-kw", type=float, default=100.0)
@@ -103,8 +113,20 @@ def main():
 
     # 2. flash selection and batch-edge calibration -------------------------
     f = fl[fl.trig_row.isin(trig.trig_row)].merge(trig[["trig_row", "spill"]], on="trig_row")
-    f = f[(f.nhits >= a.min_nhits) & (f.ntpc >= a.min_ntpc)]
-    t1, edges = dr.fit_batch_edges(f.t_rel.values, a.t1_guess_ns, search_ns=600)
+    if a.select:
+        f = f.query(a.select)
+    else:
+        f = f[(f.nhits >= a.min_nhits) & (f.ntpc >= a.min_ntpc)]
+    if a.time_col != "t_rel":
+        f = f.assign(t_rel=f[a.time_col])
+    if str(a.t1_guess_ns) == "auto":
+        # densest SPILL_NS-wide window over the whole readout, then refine
+        t1, _ = dr.fit_batch_edges(f.t_rel.values, float(np.median(f.t_rel)) - numi.SPILL_NS / 2,
+                                   search_ns=float(np.ptp(f.t_rel)), step_ns=8.0)
+        audit["batch1_start_auto_coarse_ns"] = float(t1)
+        t1, edges = dr.fit_batch_edges(f.t_rel.values, t1, search_ns=600)
+    else:
+        t1, edges = dr.fit_batch_edges(f.t_rel.values, float(a.t1_guess_ns), search_ns=600)
     audit["batch1_start_ns"] = float(t1)
     audit["flashes_selected"] = int(len(f))
     # out-of-spill control region (before batch 1) -> flat background estimate
@@ -170,7 +192,7 @@ def main():
     # absolute rates and projections ---------------------------------------
     inwin = (f.t_rel >= edges[0]) & (f.t_rel < edges[-1])
     spot = trig.spillpot.mean()
-    rock = inwin & (f.ntpc >= 4)
+    rock = inwin & (f.ntpc >= 4) if "ntpc" in f else inwin & False
     cyc_spills_per_h = 3600.0 / 60.46 * 46          # 46 NuMI spills per ~60.46 s supercycle
     pot_per_spill_scan = spot * a.scan_power_kw / numi.beam_power_kw(spot)
     pot_h = pot_per_spill_scan * cyc_spills_per_h
@@ -190,14 +212,15 @@ def main():
     ax.hist(f.t_rel, bins=np.arange(t1 - 2000, t1 + numi.SPILL_NS + 3000, 32), histtype="step", color="#2a6fb0")
     for e_ in edges:
         ax.axvline(e_, color="#d0622b", lw=0.8)
-    ax.set_xlabel("flash time relative to light beam trigger [ns]"); ax.set_ylabel("flashes / 32 ns")
+    obj = "objects" if a.select else "flashes"
+    ax.set_xlabel(f"{obj[:-1]} time in detector clock [ns]"); ax.set_ylabel(f"{obj} / 32 ns")
     ax.set_title(f"{len(trig)} matched goodbeam spills; red: fitted batch edges", fontsize=8)
     fig.tight_layout(); fig.savefig(out / "flash_times.pdf"); fig.savefig(out / "flash_times.png", dpi=150); plt.close(fig)
     fig, ax = plt.subplots(figsize=(4.8, 3.4))
     ax.errorbar(per.x, per.rate_e13, per.err_e13, fmt="o", color="#2a6fb0")
     for b_, row in per.iterrows():
         ax.annotate(str(b_), (row.x, row.rate_e13), xytext=(4, 4), textcoords="offset points", fontsize=7)
-    ax.set_xlabel("batch x at target [mm]"); ax.set_ylabel("flashes per 1e13 POT")
+    ax.set_xlabel("batch x at target [mm]"); ax.set_ylabel(f"{obj} per 1e13 POT")
     fig.tight_layout(); fig.savefig(out / "rate_vs_batch_x.pdf"); plt.close(fig)
     print(json.dumps({k: res[k] for k in ("audit", "batch1_over_rest")}, indent=1, default=float))
     print(per)
