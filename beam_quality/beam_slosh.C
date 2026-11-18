@@ -177,7 +177,7 @@ void beam_slosh(const std::string& inFile =
         cutBox.Draw("l same");
         cutLab.SetTextSize(0.022);
         cutLab.DrawLatex(cutX0, cutY1 + 0.015 * (yhi - ylo),
-                         Form("NOvA goodbeam position window (%s): x %+.2f..%+.2f, y %+.2f..%+.2f mm",
+                         Form("NuMI good-beam position window (NOvA %s): x %+.2f..%+.2f, y %+.2f..%+.2f mm",
                               epoch.c_str(), cutX0, cutX1, cutY0, cutY1));
 
         title.SetTextSize(0.033);

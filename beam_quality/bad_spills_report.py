@@ -58,7 +58,7 @@ def report(stem):
     out = f"{BASE}/{stem}_bad_spills.txt"
     with open(out, "w") as f:
         f.write(f"Bad-spill report for {stem}\n")
-        f.write("goodbeam = NOvA cuts 1-5 (POT, horn current, x/y position, x/y width);\n")
+        f.write("goodbeam = NuMI beam-quality cuts 1-5 as defined by NOvA (POT, horn current, x/y position, x/y width);\n")
         f.write("the trigger-timing cut 6 is not evaluable without a detector trigger stream.\n")
         f.write(f"Cut values (NOvA epoch {recorded['epoch']}): "
                 + "; ".join(f"{n} {r}" for n, r in cuts.values()) + "\n")

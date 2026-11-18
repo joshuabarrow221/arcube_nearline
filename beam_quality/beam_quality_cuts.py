@@ -53,7 +53,7 @@ def position_box(cuts):
 def position_label(cuts):
     """Short in-plot label for the position window. Kept short so it never runs
     under a legend; the box edges themselves show the window on the axes."""
-    return f"NOvA goodbeam window ({cuts['epoch']})"
+    return f"NuMI good-beam window (NOvA {cuts['epoch']})"
 
 
 def position_window_text(cuts):

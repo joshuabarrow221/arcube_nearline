@@ -1,9 +1,10 @@
 # NuMI Beam Quality for the DUNE ND 2x2 Demonstrator
 
 Standalone tools to fetch per-spill NuMI beam data from Fermilab's
-IFBeam database, evaluate NOvA's "goodbeam" quality cuts exactly as
-NOvA does, and visualize the beam position at the target — including the
-batch-by-batch spill-train structure and beam-delivery efficiency.
+IFBeam database, evaluate the NuMI beam-quality ("goodbeam") cuts exactly
+as NOvA defines them, and visualize the NuMI beam position at the target —
+including the batch-by-batch spill-train structure and beam-delivery
+efficiency.
 
 ![batch-arrival animation frame](docs/preview_batches.png)
 
@@ -104,7 +105,7 @@ full ACNET-vs-IFBeam explanation and references.
   in the ROOT file and the same values in `_cuts.json`, read by every
   script here, so figures and reports never drift from the evaluation.
 
-## The NOvA goodbeam cuts
+## NuMI beam-quality cuts (NOvA's goodbeam definition)
 
 Values from NOvA's `IFDBSpillInfo.fcl` (`standard_ifdbspillinfo`); the
 algorithms (`BpmProjection`, `BpmAtTarget`, `ProfileProjection`,
@@ -175,12 +176,16 @@ IFBeam archive (1-minute `$A9` samples, epochs from NOvA's
 | 2023-03-15 | FHC | −753 V | −49.4 kA |
 | 2024-07-09 | RHC (2x2 Run 1) | +19.4 V | −49.7 kA |
 
-NOvA records that NuMI has run RHC since the 2023–24 shutdown (epoch
-15a, March 2024) with no end run yet, so **2x2 Run 1 (July 2024) data
-are antineutrino-mode (RHC) data**. The RHC readback has been only
-about +19 V since that shutdown (instead of about +742 V before): the
-sign is still unambiguous, but re-check the convention whenever a new
-running period starts.
+NOvA's sixth RHC range ("from long post-shutdown 2023-24", epoch 15a)
+spans ND runs 15753–15922 and FD runs 49841–50993 (novasoft `main`,
+`CAFAna/Cuts/SpillCuts.cxx` and `RunHistory.fcl`, updated 2026-09-16).
+**2x2 Run 1 (July 2024) falls inside it: antineutrino-mode (RHC) data**,
+with `E:HRNDIR` at about +19 V (instead of about +742 V before that
+shutdown). NOvA's run lists mark no later running as RHC (FHC or
+horn-off afterwards); no horn-on IFBeam sample from later running was
+found to re-check the sign (a 2026-10-07 sample was horn-off), so re-check
+the convention on the first horn-on data of each new running period. For horn-off running, drop `pass_horn`, as
+NOvA's `kTightBeamQualityCuts0HC` does.
 
 ## Timing: `$A9` records and the `$74` beam sync
 

@@ -281,10 +281,17 @@
 //  still unambiguous, but the magnitude should not be relied upon, and
 //  the convention should be re-checked whenever a new running period
 //  starts. (A horn-off sample, 2015-06-15, read NSLINA = 0 and
-//  E:HRNDIR = -1.4 V: polarity is meaningless when is0HC.) [3] records
-//  that NuMI has run RHC since the "long post-shutdown 2023-24. (epochs
-//  15a as of 14 March 2024). There is no end run for this RHC period
-//  yet": the 2x2 Run 1 data (July 2024) are antineutrino-mode (RHC) data.
+//  E:HRNDIR = -1.4 V: polarity is meaningless when is0HC.) [3] (novasoft
+//  main, commit 0acaf7b057 of 2026-09-16) lists NOvA's sixth RHC range as
+//  "from long post-shutdown 2023-24. (epoch 15a)": ND runs 15753-15922 and
+//  FD runs 49841-50993 (RunHistory.fcl RHC stop runs 15922 and 50993). The
+//  2x2 Run 1 data (July 2024, E:HRNDIR = +19 V) fall inside it and are
+//  antineutrino-mode (RHC) data. NOvA's run lists mark no later running
+//  as RHC (i.e. FHC or horn-off afterwards).
+//  No horn-on IFBeam sample after it was found to re-check the sign
+//  convention (2024-12 to 2026-05: no records in the sampled minutes;
+//  2026-10-07: horn off, NSLINA = 0, E:HRNDIR = -1.9 V), so check it again
+//  on the first horn-on data of a new running period.
 //  (An earlier version of this file called the horn-current window an
 //  "FHC selection"; it is not — it is NOvA's selection for both
 //  polarities.)

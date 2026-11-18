@@ -120,7 +120,7 @@ fig.suptitle("NuMI beam position at target  (E:HPTGT / E:VPTGT, IFBeam $A9 spill
              fontsize=19, color=INK, x=0.06, ha="left", y=0.965)
 fig.text(0.06, 0.915,
          f"{win0:%Y-%m-%d  %H:%M} → {win1:%H:%M} CDT  ·  batch positions extrapolated to target z, "
-         f"10 spills per frame  ·  red box: NOvA goodbeam window {bqc.position_window_text(CUTS)}",
+         f"10 spills per frame  ·  red box: NuMI good-beam window {bqc.position_window_text(CUTS)}",
          fontsize=12, color=INK2)
 
 # --- main panel: beam spot ---
