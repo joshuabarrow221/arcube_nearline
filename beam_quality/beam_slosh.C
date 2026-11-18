@@ -9,7 +9,12 @@
 //  TGT-station readings are linearly extrapolated to the target z
 //  (NOvA BpmProjection geometry), so the plotted coordinate is the one
 //  the goodbeam position cut is defined in. The blob's frame-to-frame
-//  motion shows the beam position "sloshing".
+//  motion shows the beam position "sloshing". The red box is the NOvA
+//  goodbeam position window (cuts 3-4) that get_data.cpp recorded in
+//  the same ROOT file as cut_minPosX/cut_maxPosX/cut_minPosY/
+//  cut_maxPosY (TParameter<double>) and cut_epoch (TNamed); for all
+//  2x2 running that is NOvA's periods-13+ window, x in (-2, +2) mm and
+//  y in (-3.5, +0.5) mm.
 //
 //  The full catalogue of NOvA's goodbeam criteria, and exactly which
 //  of them this pipeline applies, illustrates, or omits, is documented
@@ -23,9 +28,13 @@
 #include <TTreeReader.h>
 #include <TTreeReaderValue.h>
 #include <TH2D.h>
+#include <TBox.h>
 #include <TCanvas.h>
 #include <TStyle.h>
 #include <TLatex.h>
+#include <TNamed.h>
+#include <TParameter.h>
+#include <TROOT.h>
 #include <TSystem.h>
 #include <algorithm>
 #include <cstdio>
@@ -53,7 +62,7 @@ void beam_slosh(const std::string& inFile =
 
     // Surveyed BPM station z-positions [feet] and the NOvA linear
     // extrapolation of each batch to the target (z = 0): the same
-    // constants and formula as computeBpmPosition() in get_data.cpp
+    // constants and formula as bpmProjection() in get_data.cpp
     // (ported from NOvA's IFDBSpillInfo extrapolate_position /
     // BpmProjection), so the plotted coordinate matches the one the
     // goodbeam position cut acts on.
@@ -85,13 +94,30 @@ void beam_slosh(const std::string& inFile =
             xlo = std::min(xlo, p.first);  xhi = std::max(xhi, p.first);
             ylo = std::min(ylo, p.second); yhi = std::max(yhi, p.second);
         }
-    // Never clip: axes span the union of the data and the NOvA
-    // "goodbeam" position box (IFDBSpillInfo.fcl: Min/MaxPosXCut,
-    // Min/MaxPosYCut = +-2 mm at target), so off-target excursions and
-    // the cut boundary are always in view.
-    const double cutLo = -2.0, cutHi = +2.0;   // mm
-    xlo = std::min(xlo, cutLo); xhi = std::max(xhi, cutHi);
-    ylo = std::min(ylo, cutLo); yhi = std::max(yhi, cutHi);
+    // The NOvA "goodbeam" position window (cuts 3-4) exactly as
+    // get_data.cpp applied it: read back from the cut_* objects it wrote
+    // into this file. Files written before that record existed fall back
+    // to NOvA's current values (periods 13+, all 2x2 running), with a
+    // warning — the window is asymmetric in y since NOvA period 11.
+    auto readCut = [&f](const char* name, double fallback) {
+        auto* p = dynamic_cast<TParameter<double>*>(f.Get(name));
+        if (!p) {
+            std::cerr << "warning: " << name << " not in " << f.GetName()
+                      << "; using NOvA periods-13+ value " << fallback << "\n";
+            return fallback;
+        }
+        return p->GetVal();
+    };
+    const double cutX0 = readCut("cut_minPosX", -2.00), cutX1 = readCut("cut_maxPosX", +2.00);
+    const double cutY0 = readCut("cut_minPosY", -3.50), cutY1 = readCut("cut_maxPosY", +0.50);
+    auto* epochObj = dynamic_cast<TNamed*>(f.Get("cut_epoch"));
+    const std::string epoch = epochObj ? epochObj->GetTitle() : "P13+ (assumed)";
+
+    // Never clip: axes span the union of the data and the goodbeam
+    // window, so off-target excursions and the cut boundary are always
+    // in view.
+    xlo = std::min(xlo, cutX0); xhi = std::max(xhi, cutX1);
+    ylo = std::min(ylo, cutY0); yhi = std::max(yhi, cutY1);
     double xpad = 0.08 * (xhi - xlo), ypad = 0.08 * (yhi - ylo);
     xlo -= xpad; xhi += xpad; ylo -= ypad; yhi += ypad;
 
@@ -127,9 +153,9 @@ void beam_slosh(const std::string& inFile =
     TLatex title; title.SetNDC(); title.SetTextFont(42);
     TLatex stamp; stamp.SetNDC(); stamp.SetTextFont(102);
 
-    // NOvA goodbeam position box cut (IFDBSpillInfo: goodbeam requires
-    // posx and posy inside +-2 mm, alongside POT/horn/width/timing cuts).
-    TBox cutBox(cutLo, cutLo, cutHi, cutHi);
+    // NOvA goodbeam position window (IFDBSpillInfo: goodbeam requires
+    // posx and posy inside it, alongside POT/horn/width/timing cuts).
+    TBox cutBox(cutX0, cutY0, cutX1, cutY1);
     cutBox.SetFillStyle(0);
     cutBox.SetLineColor(kRed + 1);
     cutBox.SetLineWidth(4);
@@ -150,8 +176,9 @@ void beam_slosh(const std::string& inFile =
         h.Draw("COLZ");
         cutBox.Draw("l same");
         cutLab.SetTextSize(0.022);
-        cutLab.DrawLatex(cutLo, cutHi + 0.015 * (yhi - ylo),
-                         "NOvA goodbeam position cut (#pm2 mm)");
+        cutLab.DrawLatex(cutX0, cutY1 + 0.015 * (yhi - ylo),
+                         Form("NOvA goodbeam position window (%s): x %+.2f..%+.2f, y %+.2f..%+.2f mm",
+                              epoch.c_str(), cutX0, cutX1, cutY0, cutY1));
 
         title.SetTextSize(0.033);
         title.DrawLatex(0.09, 0.955,

@@ -8,8 +8,10 @@ extrapolated to the target z (NOvA's BpmProjection geometry), so the
 plotted coordinate is the one the goodbeam position cut is defined in.
 Each frame shows the 60 batch points of 10 consecutive spills. Axes are
 never clipped: they span the union of the data and the NOvA "goodbeam"
-position box cut (IFDBSpillInfo.fcl: posx and posy within +-2 mm at
-target), which is drawn on the plot. Rendered at 3000x2000.
+position window of cuts 3-4 that get_data.cpp recorded for this output
+(<stem>_cuts.json, via beam_quality_cuts.py; for all 2x2 running that is
+NOvA's periods-13+ window x in (-2, +2) mm, y in (-3.5, +0.5) mm), which
+is drawn on the plot. Rendered at 3000x2000.
 
 The full catalogue of NOvA's goodbeam criteria, and exactly which of
 them this pipeline applies, illustrates, or omits, is documented in the
@@ -26,6 +28,8 @@ from PIL import Image
 from datetime import datetime, timedelta, timezone
 import os, sys
 
+import beam_quality_cuts as bqc
+
 BASE = os.environ.get("BEAMQ_DIR", os.getcwd())
 # usage: python3 beam_gif.py [get_data_<t0>_to_<t1>]
 STEM = sys.argv[1] if len(sys.argv) > 1 else \
@@ -34,7 +38,9 @@ CSV = f"{BASE}/{STEM}.csv"
 OUT = f"{BASE}/beam_position_spills_{STEM.replace('get_data_', '')}.gif"
 SPILLS_PER_FRAME = 10
 TRAIL_SPILLS = 50          # how many previous spills stay visible, fading
-CUT = 2.0                  # NOvA goodbeam position cut: |x|,|y| < 2 mm
+# NOvA goodbeam position window (cuts 3-4) exactly as get_data.cpp applied it
+CUTS = bqc.load_cuts(BASE, STEM)
+BOX = bqc.position_box(CUTS)          # (x0, y0, width, height) [mm]
 CDT = timezone(timedelta(hours=-5))
 
 # palette (dataviz reference, light mode, committed single look)
@@ -55,9 +61,9 @@ def batches(device, col):
 
 # Surveyed BPM station z-positions [feet] and the NOvA linear
 # extrapolation of each batch to the target (z = 0): the same constants
-# and formula as computeBpmPosition() in get_data.cpp (ported from
-# NOvA's IFDBSpillInfo extrapolate_position/BpmProjection), so the
-# plotted coordinates match the ones the goodbeam position cut acts on.
+# and formula as bpmProjection() in get_data.cpp (ported from NOvA's
+# IFDBSpillInfo extrapolate_position/BpmProjection), so the plotted
+# coordinates match the ones the goodbeam position cut acts on.
 Z_HP121, Z_VP121 = -68.04458, -66.99283
 Z_HPTGT, Z_VPTGT = -31.25508, -30.16533
 FX = (0.0 - Z_HP121) / (Z_HPTGT - Z_HP121)
@@ -88,12 +94,9 @@ y = P["y"].values
 tmin = (P["t"].values - t0) / 60.0
 spill = P["spill"].values
 
-# never clip: axes cover the data AND the goodbeam box
-def lims(c, pad=0.06):
-    lo, hi = min(np.min(c), -CUT), max(np.max(c), CUT)
-    p = (hi - lo) * pad
-    return lo - p, hi + p
-xlim, ylim = lims(x), lims(y)
+# never clip: axes cover the data AND the (asymmetric) goodbeam window
+xlim = bqc.window_limits(x, CUTS["minPosX"], CUTS["maxPosX"])
+ylim = bqc.window_limits(y, CUTS["minPosY"], CUTS["maxPosY"])
 tlim = (tmin[0] - 1, tmin[-1] + 1)
 
 fig = plt.figure(figsize=(15, 10), dpi=200)
@@ -117,7 +120,7 @@ fig.suptitle("NuMI beam position at target  (E:HPTGT / E:VPTGT, IFBeam $A9 spill
              fontsize=19, color=INK, x=0.06, ha="left", y=0.965)
 fig.text(0.06, 0.915,
          f"{win0:%Y-%m-%d  %H:%M} → {win1:%H:%M} CDT  ·  batch positions extrapolated to target z, "
-         "10 spills per frame  ·  red box: NOvA goodbeam cut (|x|,|y| < 2 mm)",
+         f"10 spills per frame  ·  red box: NOvA goodbeam window {bqc.position_window_text(CUTS)}",
          fontsize=12, color=INK2)
 
 # --- main panel: beam spot ---
@@ -125,9 +128,9 @@ axM.set_xlabel("Horizontal position at target [mm]", fontsize=13, color=INK)
 axM.set_ylabel("Vertical position at target [mm]", fontsize=13, color=INK)
 axM.set_xlim(*xlim); axM.set_ylim(*ylim)
 axM.scatter(x, y, s=4, color=CTX, linewidths=0, zorder=1)   # full-hour context
-axM.add_patch(Rectangle((-CUT, -CUT), 2 * CUT, 2 * CUT, fill=False,
+axM.add_patch(Rectangle(BOX[:2], BOX[2], BOX[3], fill=False,
                         edgecolor=RED, linewidth=2.2, linestyle=(0, (6, 3)), zorder=2))
-axM.text(-CUT + 0.06, -CUT + 0.06, "NOvA goodbeam position cut (±2 mm)",
+axM.text(BOX[0] + 0.06, BOX[1] + 0.06, bqc.position_label(CUTS),
          color=RED, fontsize=11, va="bottom")
 trail_sc = axM.scatter([], [], s=16, linewidths=0, zorder=3)
 cur_sc = axM.scatter([], [], s=42, color=BLUE, edgecolors=SURF,
@@ -136,12 +139,13 @@ stamp = axM.text(0.03, 0.97, "", transform=axM.transAxes, fontsize=13,
                  color=INK, va="top", family="monospace")
 
 # --- time-series panels: every batch reading, no averaging ---
-for ax, c, lab in ((axX, x, "Horizontal"), (axY, y, "Vertical")):
+for ax, c, lab, lo, hi in ((axX, x, "Horizontal", CUTS["minPosX"], CUTS["maxPosX"]),
+                           (axY, y, "Vertical", CUTS["minPosY"], CUTS["maxPosY"])):
     ax.set_xlim(*tlim)
-    ax.set_ylim(*lims(c))
+    ax.set_ylim(*bqc.window_limits(c, lo, hi))
     ax.scatter(tmin, c, s=1.5, color=CTX, linewidths=0)
-    ax.axhline(+CUT, color=RED, lw=1.4, linestyle=(0, (6, 3)))
-    ax.axhline(-CUT, color=RED, lw=1.4, linestyle=(0, (6, 3)))
+    ax.axhline(hi, color=RED, lw=1.4, linestyle=(0, (6, 3)))
+    ax.axhline(lo, color=RED, lw=1.4, linestyle=(0, (6, 3)))
     ax.set_title(f"{lab} position vs time (per batch)", fontsize=13, color=INK, loc="left")
     ax.set_ylabel("[mm]", fontsize=12, color=INK)
 axY.set_xlabel(f"Minutes after {win0:%H:%M} CDT", fontsize=12, color=INK)

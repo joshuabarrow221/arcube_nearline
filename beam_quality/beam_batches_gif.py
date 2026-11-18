@@ -19,8 +19,10 @@ The main panel carries running "POT passed" / "POT missed" integrators
 as missed spills), and a third right-hand panel tracks the POT-weighted
 beam-delivery efficiency: one dot per 10-spill group plus the
 cumulative running efficiency. Axes are never clipped: they span the
-union of the data and the NOvA goodbeam position box (|x|,|y| < 2 mm),
-drawn in red. All plotted positions are the per-batch 121- and
+union of the data and the NOvA goodbeam position window of cuts 3-4 as
+recorded by get_data.cpp (<stem>_cuts.json via beam_quality_cuts.py;
+for all 2x2 running NOvA's periods-13+ window, x in (-2, +2) mm and
+y in (-3.5, +0.5) mm), drawn in red. All plotted positions are the per-batch 121- and
 TGT-station BPM readings linearly extrapolated to the target z (NOvA's
 BpmProjection geometry) — the same coordinate the goodbeam position cut
 is defined in, so the box and the points are directly comparable.
@@ -42,6 +44,8 @@ from PIL import Image
 from datetime import datetime, timedelta, timezone
 import os, shutil, sys
 
+import beam_quality_cuts as bqc
+
 BASE = os.environ.get("BEAMQ_DIR", os.getcwd())
 # usage: python3 beam_batches_gif.py [get_data_<t0>_to_<t1>]
 STEM = sys.argv[1] if len(sys.argv) > 1 else \
@@ -50,7 +54,9 @@ CSV = f"{BASE}/{STEM}.csv"
 QCSV = f"{BASE}/{STEM}_quality.csv"
 OUT = f"{BASE}/beam_position_batches_{STEM.replace('get_data_', '')}.gif"
 SPILLS_PER_GROUP = 10
-CUT = 2.0                  # NOvA goodbeam position cut: |x|,|y| < 2 mm
+# NOvA goodbeam position window (cuts 3-4) exactly as get_data.cpp applied it
+CUTS = bqc.load_cuts(BASE, STEM)
+BOX = bqc.position_box(CUTS)          # (x0, y0, width, height) [mm]
 CDT = timezone(timedelta(hours=-5))
 
 # palette (dataviz reference, light mode, committed single look)
@@ -77,9 +83,9 @@ def batches(device, col):
 
 # Surveyed BPM station z-positions [feet] and the NOvA linear
 # extrapolation of each batch to the target (z = 0): the same constants
-# and formula as computeBpmPosition() in get_data.cpp (ported from
-# NOvA's IFDBSpillInfo extrapolate_position/BpmProjection), so the
-# plotted coordinates match the ones the goodbeam position cut acts on.
+# and formula as bpmProjection() in get_data.cpp (ported from NOvA's
+# IFDBSpillInfo extrapolate_position/BpmProjection), so the plotted
+# coordinates match the ones the goodbeam position cut acts on.
 Z_HP121, Z_VP121 = -68.04458, -66.99283
 Z_HPTGT, Z_VPTGT = -31.25508, -30.16533
 FX = (0.0 - Z_HP121) / (Z_HPTGT - Z_HP121)
@@ -140,11 +146,9 @@ for g in range(n_groups):
     prev_t = group_tend[g]
 cum_eff = 100.0 * cum_pass / np.where(cum_pass + cum_miss > 0, cum_pass + cum_miss, np.nan)
 
-def lims(c, pad=0.06):
-    lo, hi = min(np.min(c), -CUT), max(np.max(c), CUT)
-    p = (hi - lo) * pad
-    return lo - p, hi + p
-xlim, ylim = lims(x), lims(y)
+# never clip: axes cover the data AND the (asymmetric) goodbeam window
+xlim = bqc.window_limits(x, CUTS["minPosX"], CUTS["maxPosX"])
+ylim = bqc.window_limits(y, CUTS["minPosY"], CUTS["maxPosY"])
 tlim = (tmin[0] - 1, tmin[-1] + 1)
 gmin = (group_tend - t0) / 60.0
 
@@ -177,9 +181,9 @@ fig.text(0.06, 0.915,
 axM.set_xlabel("Horizontal position at target [mm]", fontsize=13, color=INK)
 axM.set_ylabel("Vertical position at target [mm]", fontsize=13, color=INK)
 axM.set_xlim(*xlim); axM.set_ylim(*ylim)
-axM.add_patch(Rectangle((-CUT, -CUT), 2 * CUT, 2 * CUT, fill=False,
+axM.add_patch(Rectangle(BOX[:2], BOX[2], BOX[3], fill=False,
                         edgecolor=RED, linewidth=2.2, linestyle=(0, (6, 3)), zorder=2))
-axM.text(-CUT + 0.06, -CUT + 0.06, "NOvA goodbeam position cut (±2 mm)",
+axM.text(BOX[0] + 0.06, BOX[1] + 0.06, bqc.position_label(CUTS),
          color=RED, fontsize=11, va="bottom")
 acc_sc = axM.scatter([], [], s=4, color=CTX, linewidths=0, zorder=1)
 b1p_sc = axM.scatter([], [], s=46, color=ORANGE, edgecolors=SURF, linewidths=0.8, zorder=5)
@@ -203,14 +207,15 @@ axM.legend(handles=[
     framealpha=1.0, fontsize=11, labelcolor=INK)
 
 # --- time-series panels: every batch reading, no averaging ---
-for ax, lab in ((axX, "Horizontal"), (axY, "Vertical")):
+for ax, lab, lo, hi in ((axX, "Horizontal", CUTS["minPosX"], CUTS["maxPosX"]),
+                        (axY, "Vertical", CUTS["minPosY"], CUTS["maxPosY"])):
     ax.set_xlim(*tlim)
-    ax.axhline(+CUT, color=RED, lw=1.4, linestyle=(0, (6, 3)))
-    ax.axhline(-CUT, color=RED, lw=1.4, linestyle=(0, (6, 3)))
+    ax.axhline(hi, color=RED, lw=1.4, linestyle=(0, (6, 3)))
+    ax.axhline(lo, color=RED, lw=1.4, linestyle=(0, (6, 3)))
     ax.set_title(f"{lab} position vs time (per batch)", fontsize=13, color=INK, loc="left")
     ax.set_ylabel("[mm]", fontsize=12, color=INK)
-axX.set_ylim(*lims(x))
-axY.set_ylim(*lims(y))
+axX.set_ylim(*xlim)
+axY.set_ylim(*ylim)
 accX = axX.scatter([], [], s=1.5, color=CTX, linewidths=0)
 accY = axY.scatter([], [], s=1.5, color=CTX, linewidths=0)
 curBX = axX.scatter([], [], s=6, color=BLUE, linewidths=0)
